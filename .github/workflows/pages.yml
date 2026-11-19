@@ -6,6 +6,8 @@ on:
       - main
     paths:
       - 'Site-Web/**'
+      - 'PC/src/**'
+      - 'PC/shared/**'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -28,13 +30,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: 'Site-Web/package-lock.json'
+
+      - name: Install & build Site-Web
+        working-directory: Site-Web
+        run: |
+          npm ci
+          npm run build
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
       - name: Upload Site-Web artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: 'Site-Web'
+          path: 'Site-Web/dist'
 
       - name: Deploy to GitHub Pages
         id: deployment

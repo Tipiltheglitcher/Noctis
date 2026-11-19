@@ -9,6 +9,8 @@ Mobile/android/.gradle/
 Mobile/android/build/
 Mobile/android/app/build/
 Mobile/android/local.properties
+Site-Web/node_modules/
+Site-Web/dist/
 *.jks
 *.keystore
 *.log
