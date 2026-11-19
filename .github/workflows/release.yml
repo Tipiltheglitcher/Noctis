@@ -108,7 +108,7 @@ jobs:
           path: Mobile/release/*.apk
 
   publish-release:
-    name: Publish GitHub Release
+    name: Publish GitHub Release (Windows Setup; APK uploaded manually after VirusTotal)
     needs: [build-windows, build-android]
     runs-on: ubuntu-latest
     steps:
@@ -119,12 +119,6 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: windows-setup
-          path: release-assets
-
-      - name: Download Android artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: android-apk
           path: release-assets
 
       - name: Create or update GitHub Release
