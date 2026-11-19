@@ -75,9 +75,12 @@ jobs:
           npm run cap:sync
 
       - name: Prepare Android release keystore
-        if: ${{ secrets.NOCTIS_KEYSTORE_B64 != '' }}
+        env:
+          KS_B64: ${{ secrets.NOCTIS_KEYSTORE_B64 }}
         run: |
-          echo "${{ secrets.NOCTIS_KEYSTORE_B64 }}" | base64 -d > "${{ runner.temp }}/noctis-release.jks"
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > "${{ runner.temp }}/noctis-release.jks"
+          fi
 
       - name: Build Android APK
         working-directory: Mobile/android
@@ -91,6 +94,7 @@ jobs:
           IFS='.' read -r MAJ MIN PAT <<< "$VERSION"
           export NOCTIS_VERSION_NAME="$VERSION"
           export NOCTIS_VERSION_CODE=$((MAJ * 10000 + MIN * 100 + PAT))
+          sed -i 's/\r$//' ./gradlew
           chmod +x ./gradlew
           ./gradlew assembleRelease
           mkdir -p ../release
@@ -134,5 +138,12 @@ jobs:
           else
             gh release create "$TAG" release-assets/* \
               --title "Noctis $TAG" \
-              --generate-notes
+              --notes "Première version publique de **Noctis** pour Windows (\`Setup.exe\`) et Android (\`.apk\`).
+
+- Connexion **Lycée Connecté / ÉduConnect** automatique + **QR Code**
+- Emploi du temps avec pop-up de cours complète (contenu de séance, fichiers, devoirs liés)
+- Informations & Sondages compatibles PRONOTE 2026 (avec réponses interactives)
+- Cantine séparée **Midi** et **Soir · Internat**
+- Notes, courbes & **Simulateur de moyenne**
+- Vérification automatique des mises à jour via GitHub Releases"
           fi
