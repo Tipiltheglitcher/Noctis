@@ -1,0 +1,16 @@
+node_modules/
+PC/node_modules/
+PC/dist/
+PC/dist-electron/
+PC/release/
+Mobile/node_modules/
+Mobile/dist/
+Mobile/android/.gradle/
+Mobile/android/build/
+Mobile/android/app/build/
+Mobile/android/local.properties
+*.jks
+*.keystore
+*.log
+.DS_Store
+Thumbs.db

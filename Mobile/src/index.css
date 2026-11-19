@@ -1,0 +1,88 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root,
+[data-accent='violet'] {
+  --accent-rgb: 139 116 255;
+}
+
+[data-accent='emerald'] {
+  --accent-rgb: 16 185 129;
+}
+
+[data-accent='cyan'] {
+  --accent-rgb: 34 211 238;
+}
+
+[data-accent='mono'] {
+  --accent-rgb: 244 244 245;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: #060608;
+  color: #f4f4f6;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.safe-top {
+  padding-top: max(env(safe-area-inset-top), 10px);
+}
+
+.safe-bottom {
+  padding-bottom: max(env(safe-area-inset-bottom), 10px);
+}
+
+.obsidian-glow {
+  background-image: radial-gradient(
+    420px circle at 20% -5%,
+    rgb(var(--accent-rgb) / 0.14),
+    transparent 65%
+  );
+}
+
+.pronote-html {
+  color: #d4d4dc;
+  line-height: 1.55;
+  font-size: 0.875rem;
+  word-break: break-word;
+}
+
+.pronote-html p {
+  margin: 0.3rem 0;
+}
+
+.pronote-html a {
+  color: rgb(var(--accent-rgb));
+  text-decoration: underline;
+}
+
+.pronote-html strong,
+.pronote-html b {
+  color: #fff;
+}
+
+.pronote-html span[style*='color'] {
+  color: inherit !important;
+}
+
+.pronote-html span[style*='background'] {
+  background: rgba(255, 255, 255, 0.08) !important;
+  padding: 0 3px;
+  border-radius: 3px;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

@@ -1,0 +1,142 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root,
+[data-accent='violet'] {
+  --accent-rgb: 139 116 255;
+}
+
+[data-accent='emerald'] {
+  --accent-rgb: 16 185 129;
+}
+
+[data-accent='cyan'] {
+  --accent-rgb: 34 211 238;
+}
+
+[data-accent='mono'] {
+  --accent-rgb: 244 244 245;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: #060608;
+  color: #f4f4f6;
+}
+
+/* Frameless window drag region */
+.app-drag {
+  -webkit-app-region: drag;
+}
+
+.app-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* Custom sleek dark scrollbar */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Pronote sanitized rich HTML inside dark surfaces */
+.pronote-html {
+  color: #d4d4dc;
+  line-height: 1.62;
+  font-size: 0.9rem;
+  word-break: break-word;
+}
+
+.pronote-html p {
+  margin: 0.35rem 0;
+}
+
+.pronote-html p:first-child {
+  margin-top: 0;
+}
+
+.pronote-html p:last-child {
+  margin-bottom: 0;
+}
+
+.pronote-html a {
+  color: rgb(var(--accent-rgb));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.pronote-html ul,
+.pronote-html ol {
+  padding-left: 1.25rem;
+  margin: 0.4rem 0;
+}
+
+.pronote-html ul {
+  list-style-type: disc;
+}
+
+.pronote-html ol {
+  list-style-type: decimal;
+}
+
+.pronote-html strong,
+.pronote-html b {
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.pronote-html h1,
+.pronote-html h2,
+.pronote-html h3,
+.pronote-html h4 {
+  color: #ffffff;
+  font-weight: 600;
+  margin: 0.75rem 0 0.35rem;
+}
+
+.pronote-html span[style*='color'] {
+  color: inherit !important;
+}
+
+.pronote-html span[style*='background'] {
+  background: rgba(255, 255, 255, 0.08) !important;
+  padding: 0 3px;
+  border-radius: 3px;
+}
+
+/* Subtle ambient glow backdrop */
+.obsidian-glow {
+  background-image: radial-gradient(
+      620px circle at 18% -10%,
+      rgb(var(--accent-rgb) / 0.12),
+      transparent 65%
+    ),
+    radial-gradient(
+      480px circle at 92% 8%,
+      rgb(var(--accent-rgb) / 0.06),
+      transparent 60%
+    );
+}
