@@ -136,14 +136,17 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" release-assets/* --clobber
           else
+            cat <<'EOF' > release-notes.md
+            Première version publique de **Noctis** pour Windows (`Setup.exe`) et Android (`.apk`).
+
+            - Connexion **Lycée Connecté / ÉduConnect** automatique + **QR Code**
+            - Emploi du temps avec pop-up de cours complète (contenu de séance, fichiers, devoirs liés)
+            - Informations & Sondages compatibles PRONOTE 2026 (avec réponses interactives)
+            - Cantine séparée **Midi** et **Soir · Internat**
+            - Notes, courbes & **Simulateur de moyenne**
+            - Vérification automatique des mises à jour via GitHub Releases
+            EOF
             gh release create "$TAG" release-assets/* \
               --title "Noctis $TAG" \
-              --notes "Première version publique de **Noctis** pour Windows (\`Setup.exe\`) et Android (\`.apk\`).
-
-- Connexion **Lycée Connecté / ÉduConnect** automatique + **QR Code**
-- Emploi du temps avec pop-up de cours complète (contenu de séance, fichiers, devoirs liés)
-- Informations & Sondages compatibles PRONOTE 2026 (avec réponses interactives)
-- Cantine séparée **Midi** et **Soir · Internat**
-- Notes, courbes & **Simulateur de moyenne**
-- Vérification automatique des mises à jour via GitHub Releases"
+              --notes-file release-notes.md
           fi
