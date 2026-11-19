@@ -183,7 +183,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   const surveyCount = news.filter((n) => n.is === 'survey').length;
 
   return (
-    <div className="h-full flex flex-col p-5 lg:p-6 gap-4 animate-fade-in">
+    <div className="lg:h-full flex flex-col p-4 sm:p-5 lg:p-6 gap-4 animate-fade-in">
       {/* Header + Sub-tabs */}
       <div className="flex flex-wrap items-center justify-between gap-3 shrink-0">
         <div className="flex items-center gap-3">
@@ -259,7 +259,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       {/* Split Pane */}
       <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-4">
         {/* Left List */}
-        <div className="lg:col-span-4 rounded-2xl bg-[#0C0C11] border border-white/[0.06] overflow-y-auto divide-y divide-white/[0.05]">
+        <div className="lg:col-span-4 max-h-[38vh] lg:max-h-none rounded-2xl bg-[#0C0C11] border border-white/[0.06] overflow-y-auto divide-y divide-white/[0.05]">
           {subTab === 'news' ? (
             filteredNews.length === 0 ? (
               <div className="py-16 text-center text-xs text-zinc-500">
