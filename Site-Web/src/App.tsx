@@ -21,7 +21,6 @@ import { MessagesView } from '../../PC/src/views/MessagesView';
 import { MenusView } from '../../PC/src/views/MenusView';
 import { SettingsView } from '../../PC/src/views/SettingsView';
 import { WebTopBar } from './components/WebTopBar';
-import { WebLoginView } from './components/WebLoginView';
 
 export default function App() {
   const [profile, setProfile] = useState<StudentProfile | null>(null);
@@ -53,6 +52,12 @@ export default function App() {
 
   useEffect(() => {
     window.pronoteAPI.system.getSettings().then(setSettings).catch(() => {});
+    // Launch directly into the interactive demo with zero login wall
+    window.pronoteAPI.auth.loginDemo().then((res) => {
+      if (res.ok && res.profile) {
+        handleAuthenticated(res.profile);
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -161,8 +166,7 @@ export default function App() {
   };
 
   const handleLogout = async () => {
-    await window.pronoteAPI.auth.logout();
-    setProfile(null);
+    window.location.href = './';
   };
 
   const handleToggleHomework = async (id: string, done: boolean) => {
@@ -194,7 +198,9 @@ export default function App() {
       <WebTopBar profile={profile} refreshing={refreshing} onRefresh={profile ? refreshAll : undefined} />
 
       {!profile ? (
-        <WebLoginView onAuthenticated={handleAuthenticated} />
+        <div className="flex-1 flex items-center justify-center text-sm text-zinc-400">
+          Chargement de la démo Noctis…
+        </div>
       ) : (
         <div className="flex-1 min-h-0 flex overflow-hidden">
           <Sidebar

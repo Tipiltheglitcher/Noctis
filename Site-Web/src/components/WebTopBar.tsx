@@ -17,8 +17,8 @@ export const WebTopBar: React.FC<WebTopBarProps> = ({ profile, refreshing, onRef
         </div>
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-[14px] font-bold tracking-tight text-white">Noctis</span>
-          <span className="px-1.5 py-0.5 rounded bg-white/[0.07] text-[10px] font-semibold uppercase tracking-wider text-zinc-300">
-            Web
+          <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/25 text-[10px] font-semibold uppercase tracking-wider">
+            Démo interactive
           </span>
           {profile && (
             <>
@@ -50,7 +50,7 @@ export const WebTopBar: React.FC<WebTopBarProps> = ({ profile, refreshing, onRef
         )}
 
         <a
-          href="./download.html"
+          href="./"
           className="h-8 px-3.5 rounded-lg bg-accent hover:opacity-90 text-black text-xs font-bold flex items-center gap-1.5 shadow-glow transition-opacity"
         >
           <Download className="w-3.5 h-3.5" />

@@ -329,12 +329,13 @@ function buildLocalDemoData() {
     {
       id: 'n1',
       is: 'information',
-      title: 'Bienvenue sur Noctis Web',
+      title: 'Bienvenue dans la démo interactive de Noctis',
       category: 'Informations',
       author: 'Noctis',
       creationDate: now.toISOString(),
       read: false,
-      content: '<p>Ceci est l’aperçu interactif de <strong>Noctis Web</strong>. Pour connecter ton vrai compte PRONOTE depuis le navigateur, configure ton relais Cloudflare Worker gratuit ou télécharge <strong>Noctis PC / Android</strong> (bouton Télécharger en haut à droite).</p>',
+      content:
+        '<p>Teste librement l’interface <strong>Noctis</strong> : clique sur un cours dans l’emploi du temps pour ouvrir sa pop-up de contenu, coche les devoirs, essaie le <strong>simulateur de moyenne</strong> dans Notes, ou regarde la séparation <strong>Midi / Soir (Internat)</strong> dans Cantine.</p><p>Pour connecter ton vrai compte Lycée Connecté ou QR Code, clique sur <strong>Télécharger PC / Android</strong> en haut à droite !</p>',
       attachments: [],
     },
   ];
