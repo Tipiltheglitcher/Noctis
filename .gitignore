@@ -5,6 +5,7 @@ PC/dist-electron/
 PC/release/
 Mobile/node_modules/
 Mobile/dist/
+Mobile/release/
 Mobile/android/.gradle/
 Mobile/android/build/
 Mobile/android/app/build/
