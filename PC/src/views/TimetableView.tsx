@@ -61,7 +61,9 @@ export const TimetableView: React.FC<TimetableViewProps> = ({
   onToggleHomework,
 }) => {
   const [popover, setPopover] = useState<PopoverState | null>(null);
-  const [viewMode, setViewMode] = useState<'week' | 'day'>('week');
+  const [viewMode, setViewMode] = useState<'week' | 'day'>(() =>
+    typeof window !== 'undefined' && window.innerWidth < 768 ? 'day' : 'week'
+  );
   const [lessonCache, setLessonCache] = useState<Record<string, LessonDetailsDTO | null>>({});
   const [loadingDetails, setLoadingDetails] = useState(false);
   const popoverRef = useRef<HTMLDivElement | null>(null);
@@ -259,25 +261,36 @@ export const TimetableView: React.FC<TimetableViewProps> = ({
     });
   };
 
-  // Compute smart side-by-side floating popover position right next to clicked course
+  // Compute smart side-by-side floating popover position (or centered mobile sheet on phones)
   const popoverPosition = useMemo(() => {
     if (!popover) return null;
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    const margin = 12;
+    const width = Math.min(POPOVER_WIDTH, vw - 24);
     const maxHeight = Math.min(540, vh - 80);
 
-    const canPlaceRight = popover.rect.right + margin + POPOVER_WIDTH <= vw - 12;
+    if (vw < 640) {
+      return {
+        left: Math.round((vw - width) / 2),
+        top: Math.max(56, Math.round((vh - Math.min(maxHeight, 440)) / 2)),
+        width,
+        maxHeight: Math.min(maxHeight, vh - 96),
+        side: 'right' as const,
+      };
+    }
+
+    const margin = 12;
+    const canPlaceRight = popover.rect.right + margin + width <= vw - 12;
     const side: 'right' | 'left' = canPlaceRight ? 'right' : 'left';
     const left =
       side === 'right'
         ? popover.rect.right + margin
-        : Math.max(12, popover.rect.left - POPOVER_WIDTH - margin);
+        : Math.max(12, popover.rect.left - width - margin);
 
     const idealTop = popover.rect.top - 8;
     const top = Math.max(54, Math.min(vh - maxHeight - 16, idealTop));
 
-    return { left, top, maxHeight, side };
+    return { left, top, width, maxHeight, side };
   }, [popover]);
 
   // Combine resource-linked assignments + homework matching same subject & day
@@ -600,7 +613,7 @@ export const TimetableView: React.FC<TimetableViewProps> = ({
             position: 'fixed',
             top: `${popoverPosition.top}px`,
             left: `${popoverPosition.left}px`,
-            width: `${POPOVER_WIDTH}px`,
+            width: `${popoverPosition.width}px`,
             maxHeight: `${popoverPosition.maxHeight}px`,
           }}
           className="z-50 rounded-2xl bg-[#101018]/98 border border-white/[0.13] shadow-[0_20px_60px_-10px_rgba(0,0,0,0.9)] backdrop-blur-xl flex flex-col overflow-hidden animate-slide-up"

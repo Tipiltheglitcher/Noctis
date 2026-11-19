@@ -556,10 +556,11 @@
             </div>
             <a
               id="win-download"
-              href="https://github.com/Tipiltheglitcher/Noctis/releases/latest"
+              href="https://github.com/Tipiltheglitcher/Noctis/releases/latest/download/Noctis-1.0.0-Setup.exe"
+              download
               class="dl-btn"
             >
-              Télécharger Noctis Setup (.exe)
+              Télécharger pour Windows (.exe)
             </a>
           </div>
 
@@ -583,29 +584,21 @@
             </div>
             <a
               id="apk-download"
-              href="https://github.com/Tipiltheglitcher/Noctis/releases/latest"
+              href="#download"
+              download
               class="dl-btn secondary"
             >
-              Télécharger Noctis (.apk)
+              Chargement du fichier (.apk)…
             </a>
           </div>
         </div>
 
-        <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:14px;margin-top:16px">
+        <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:14px;margin-top:18px">
           <a
             href="./demo.html"
-            style="display:inline-flex;align-items:center;gap:8px;padding:10px 18px;border-radius:12px;background:rgba(139,116,255,0.14);border:1px solid rgba(139,116,255,0.38);color:#e4dcff;font-size:13.5px;font-weight:700"
+            style="display:inline-flex;align-items:center;gap:8px;padding:11px 20px;border-radius:12px;background:rgba(139,116,255,0.14);border:1px solid rgba(139,116,255,0.38);color:#e4dcff;font-size:13.5px;font-weight:700"
           >
-            ✨ Essayer la Démo interactive dans le navigateur →
-          </a>
-          <a
-            class="release-link"
-            style="margin-top:0"
-            href="https://github.com/Tipiltheglitcher/Noctis/releases"
-            target="_blank"
-            rel="noreferrer"
-          >
-            Toutes les versions sur GitHub →
+            ✨ Essayer la Démo interactive →
           </a>
         </div>
 
@@ -799,23 +792,35 @@
           if (exe) {
             const btn = document.getElementById('win-download');
             btn.href = exe.browser_download_url;
-            btn.textContent = `Télécharger ${exe.name}`;
-            document.getElementById('win-meta').textContent = `Windows 64-bit${fmtSize(exe.size)}`;
+            btn.setAttribute('download', exe.name);
+            btn.textContent = `Télécharger pour Windows (.exe)`;
+            document.getElementById('win-meta').textContent = `Windows 64-bit · ${tag}${fmtSize(exe.size)}`;
           }
 
+          const apkBtn = document.getElementById('apk-download');
           if (apk) {
-            const btn = document.getElementById('apk-download');
-            btn.href = apk.browser_download_url;
-            btn.textContent = `Télécharger ${apk.name}`;
-            document.getElementById('apk-meta').textContent = `Android APK${fmtSize(apk.size)}`;
+            apkBtn.href = apk.browser_download_url;
+            apkBtn.setAttribute('download', apk.name);
+            apkBtn.textContent = `Télécharger pour Android (.apk)`;
+            apkBtn.style.opacity = '1';
+            apkBtn.style.pointerEvents = 'auto';
+            document.getElementById('apk-meta').textContent = `Android · ${tag}${fmtSize(apk.size)}`;
           } else {
+            apkBtn.removeAttribute('href');
+            apkBtn.textContent = 'APK en vérification (bientôt prêt)';
+            apkBtn.style.opacity = '0.5';
+            apkBtn.style.pointerEvents = 'none';
             document.getElementById('apk-meta').textContent =
               'Vérification Google / VirusTotal en cours…';
           }
         } catch {
-          document.getElementById('version-label').textContent = 'Noctis · Téléchargements GitHub';
+          document.getElementById('version-label').textContent = 'Noctis v1.0.0 · Téléchargement direct';
+          const apkBtn = document.getElementById('apk-download');
+          apkBtn.href = `https://github.com/${REPO}/releases/latest/download/Noctis-1.0.0.apk`;
+          apkBtn.setAttribute('download', 'Noctis-1.0.0.apk');
+          apkBtn.textContent = 'Télécharger pour Android (.apk)';
           document.getElementById('changelog-body').textContent =
-            'Retrouve toutes les releases et installateurs directement sur la page GitHub Releases.';
+            'Téléchargement direct de Noctis pour Windows (.exe) et Android (.apk).';
         }
       })();
     </script>

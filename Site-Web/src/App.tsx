@@ -1,4 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  LayoutDashboard,
+  CalendarDays,
+  BookCheck,
+  Award,
+  MoreHorizontal,
+  Clock3,
+  MessageSquareText,
+  UtensilsCrossed,
+  Settings,
+  X,
+} from 'lucide-react';
 import type {
   AppSettings,
   AttendanceDTO,
@@ -25,6 +37,7 @@ import { WebTopBar } from './components/WebTopBar';
 export default function App() {
   const [profile, setProfile] = useState<StudentProfile | null>(null);
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const [settings, setSettings] = useState<AppSettings>({
     accent: 'violet',
     notificationsEnabled: false,
@@ -194,7 +207,7 @@ export default function App() {
   );
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-[#060608] text-zinc-100 overflow-hidden">
+    <div className="h-[100dvh] w-screen flex flex-col bg-[#060608] text-zinc-100 overflow-hidden">
       <WebTopBar profile={profile} refreshing={refreshing} onRefresh={profile ? refreshAll : undefined} />
 
       {!profile ? (
@@ -202,16 +215,20 @@ export default function App() {
           Chargement de la démo Noctis…
         </div>
       ) : (
-        <div className="flex-1 min-h-0 flex overflow-hidden">
-          <Sidebar
-            activeTab={activeTab}
-            onSelectTab={setActiveTab}
-            profile={profile}
-            undoneHomeworkCount={undoneCount}
-            unreadMessagesCount={unreadCount}
-            onLogout={handleLogout}
-          />
-          <main className="flex-1 min-w-0 overflow-y-auto obsidian-glow bg-[#07070A]">
+        <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden">
+          {/* Desktop Sidebar */}
+          <div className="hidden md:flex shrink-0">
+            <Sidebar
+              activeTab={activeTab}
+              onSelectTab={setActiveTab}
+              profile={profile}
+              undoneHomeworkCount={undoneCount}
+              unreadMessagesCount={unreadCount}
+              onLogout={handleLogout}
+            />
+          </div>
+
+          <main className="flex-1 min-w-0 min-h-0 overflow-y-auto obsidian-glow bg-[#07070A]">
             {activeTab === 'dashboard' && (
               <DashboardView
                 profile={profile}
@@ -293,9 +310,9 @@ export default function App() {
               <SettingsView
                 profile={profile}
                 settings={settings}
-                appVersion="Web (Auto)"
+                appVersion="Démo Web"
                 checkingUpdate={false}
-                updateFeedback="La version Web est toujours à jour automatiquement !"
+                updateFeedback="Ceci est la démo interactive — télécharge Noctis PC ou Android pour ton compte."
                 onCheckUpdates={() => {}}
                 onUpdateSettings={async (p) => {
                   const next = await window.pronoteAPI.system.saveSettings(p);
@@ -305,6 +322,92 @@ export default function App() {
               />
             )}
           </main>
+
+          {/* Mobile Bottom Nav Bar */}
+          <nav className="md:hidden shrink-0 bg-[#09090D] border-t border-white/[0.06] grid grid-cols-5 px-2 py-2">
+            {(
+              [
+                { id: 'dashboard', label: 'Accueil', icon: LayoutDashboard },
+                { id: 'timetable', label: 'Cours', icon: CalendarDays },
+                { id: 'homework', label: 'Devoirs', icon: BookCheck },
+                { id: 'grades', label: 'Notes', icon: Award },
+              ] as const
+            ).map((item) => {
+              const Icon = item.icon;
+              const active = activeTab === item.id;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => {
+                    setMobileMoreOpen(false);
+                    setActiveTab(item.id);
+                  }}
+                  className={`flex flex-col items-center gap-1 py-0.5 text-[10.5px] font-medium ${
+                    active ? 'text-accent' : 'text-zinc-500'
+                  }`}
+                >
+                  <Icon className="w-5 h-5" />
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
+            <button
+              onClick={() => setMobileMoreOpen(true)}
+              className={`flex flex-col items-center gap-1 py-0.5 text-[10.5px] font-medium ${
+                ['attendance', 'messages', 'menus', 'settings'].includes(activeTab)
+                  ? 'text-accent'
+                  : 'text-zinc-500'
+              }`}
+            >
+              <MoreHorizontal className="w-5 h-5" />
+              <span>Plus</span>
+            </button>
+          </nav>
+
+          {/* Mobile "Plus" Drawer */}
+          {mobileMoreOpen && (
+            <div
+              onClick={() => setMobileMoreOpen(false)}
+              className="md:hidden fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end"
+            >
+              <div
+                onClick={(e) => e.stopPropagation()}
+                className="w-full rounded-t-3xl bg-[#101018] border-t border-white/10 p-5 space-y-3"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-bold text-white">Plus d'espaces</span>
+                  <button onClick={() => setMobileMoreOpen(false)} className="text-zinc-400">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-2.5">
+                  {(
+                    [
+                      { id: 'messages', label: 'Infos & Messages', icon: MessageSquareText },
+                      { id: 'menus', label: 'Cantine (Midi/Soir)', icon: UtensilsCrossed },
+                      { id: 'attendance', label: 'Vie scolaire', icon: Clock3 },
+                      { id: 'settings', label: 'Paramètres', icon: Settings },
+                    ] as const
+                  ).map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() => {
+                          setActiveTab(item.id);
+                          setMobileMoreOpen(false);
+                        }}
+                        className="p-3.5 rounded-2xl bg-[#161622] border border-white/[0.06] flex items-center gap-2.5 text-left"
+                      >
+                        <Icon className="w-5 h-5 text-accent shrink-0" />
+                        <span className="text-xs font-semibold text-white">{item.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

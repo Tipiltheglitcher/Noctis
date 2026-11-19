@@ -51,10 +51,11 @@ export const WebTopBar: React.FC<WebTopBarProps> = ({ profile, refreshing, onRef
 
         <a
           href="./"
-          className="h-8 px-3.5 rounded-lg bg-accent hover:opacity-90 text-black text-xs font-bold flex items-center gap-1.5 shadow-glow transition-opacity"
+          className="h-8 px-3 rounded-lg bg-accent hover:opacity-90 text-black text-xs font-bold flex items-center gap-1.5 shadow-glow transition-opacity shrink-0"
         >
           <Download className="w-3.5 h-3.5" />
-          <span>Télécharger PC / Android</span>
+          <span className="hidden sm:inline">Télécharger PC / Android</span>
+          <span className="sm:hidden">Télécharger</span>
         </a>
       </div>
     </header>
