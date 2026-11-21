@@ -28,6 +28,9 @@ import {
   DownloadCloud,
   Sparkles,
   AlertCircle,
+  UtensilsCrossed,
+  Coffee,
+  MoonStar,
 } from 'lucide-react';
 import type {
   AccentTheme,
@@ -63,6 +66,62 @@ import {
   stripHtml,
   toDateKey,
 } from '@/utils/format';
+import {
+  computeDayBreaks,
+  evaluateDayAutoAdvance,
+  getInitialSchoolDate,
+  getLessonTemporalState,
+  getMondayOfWeek,
+  getNextSchoolDay,
+  getRightToDisconnectInfo,
+  isWeekend,
+} from '@/utils/schoolTime';
+
+function hexToRgba(hex: string, alpha: number): string {
+  const clean = hex.replace('#', '');
+  if (clean.length !== 6) return `rgba(139, 116, 255, ${alpha})`;
+  const r = parseInt(clean.slice(0, 2), 16);
+  const g = parseInt(clean.slice(2, 4), 16);
+  const b = parseInt(clean.slice(4, 6), 16);
+  if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) {
+    return `rgba(139, 116, 255, ${alpha})`;
+  }
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+const MobileRightToDisconnectNote: React.FC<{
+  serverDisabled?: boolean;
+  onlyWhenActive?: boolean;
+}> = ({ serverDisabled = false, onlyWhenActive = false }) => {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+  const info = getRightToDisconnectInfo(now, serverDisabled);
+  if (onlyWhenActive && !info.active) return null;
+
+  if (info.active) {
+    return (
+      <div className="rounded-2xl bg-indigo-500/[0.09] border border-indigo-400/25 p-3 flex items-start gap-2.5">
+        <div className="w-7 h-7 rounded-lg bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center text-indigo-300 shrink-0 mt-0.5">
+          <MoonStar className="w-3.5 h-3.5" />
+        </div>
+        <div className="min-w-0 text-[11.5px] leading-relaxed">
+          <div className="font-semibold text-indigo-200">{info.title}</div>
+          <p className="text-indigo-200/75 mt-0.5">{info.description}</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl bg-white/[0.025] border border-white/[0.06] px-3 py-2 flex items-start gap-2 text-[11px] text-zinc-400 leading-relaxed">
+      <MoonStar className="w-3.5 h-3.5 text-indigo-400/80 shrink-0 mt-0.5" />
+      <span>{info.description}</span>
+    </div>
+  );
+};
 
 /* ================= DASHBOARD ================= */
 export const MobileDashboard: React.FC<{
@@ -71,31 +130,131 @@ export const MobileDashboard: React.FC<{
   homework: HomeworkDTO[];
   grades: GradesOverviewDTO | null;
   news: NewsItemDTO[];
+  messagingDisabled?: boolean;
   onNavigate: (tab: MobileTab) => void;
   onToggleHomework: (id: string, done: boolean) => void;
-}> = ({ profile, timetableItems, homework, grades, news, onNavigate, onToggleHomework }) => {
-  const now = new Date();
-  const todayItems = useMemo(
-    () => timetableItems.filter((i) => isSameDay(new Date(i.startDate), now)),
-    [timetableItems]
-  );
+}> = ({
+  profile,
+  timetableItems,
+  homework,
+  grades,
+  news,
+  messagingDisabled = false,
+  onNavigate,
+  onToggleHomework,
+}) => {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const displayDay = useMemo(() => {
+    const adv = evaluateDayAutoAdvance(timetableItems, now);
+    const todayItems = timetableItems
+      .filter((i) => isSameDay(new Date(i.startDate), now))
+      .sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
+
+    if (!adv.shouldAdvance && todayItems.length > 0) {
+      return { title: "Cours aujourd'hui", subtitle: null as string | null, items: todayItems };
+    }
+
+    const targetItems = timetableItems
+      .filter((i) => isSameDay(new Date(i.startDate), adv.targetDate))
+      .sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
+
+    if (targetItems.length > 0) {
+      const dayLbl = formatDateRelative(adv.targetDate.toISOString());
+      return {
+        title: `Cours · ${dayLbl.charAt(0).toUpperCase() + dayLbl.slice(1)}`,
+        subtitle: adv.label,
+        items: targetItems,
+      };
+    }
+
+    const upcoming = timetableItems.filter((item) => {
+      const d = new Date(item.startDate);
+      return !isWeekend(d) && new Date(item.endDate).getTime() > now.getTime();
+    });
+    if (upcoming.length > 0) {
+      const firstDate = new Date(upcoming[0].startDate);
+      const dayLbl = formatDateRelative(firstDate.toISOString());
+      return {
+        title: `Cours · ${dayLbl.charAt(0).toUpperCase() + dayLbl.slice(1)}`,
+        subtitle: adv.label,
+        items: upcoming
+          .filter((i) => isSameDay(new Date(i.startDate), firstDate))
+          .sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime()),
+      };
+    }
+
+    const dayLbl = formatDateRelative(adv.targetDate.toISOString());
+    return {
+      title: adv.shouldAdvance
+        ? `Cours · ${dayLbl.charAt(0).toUpperCase() + dayLbl.slice(1)}`
+        : "Cours aujourd'hui",
+      subtitle: adv.label,
+      items: [],
+    };
+  }, [timetableItems, now]);
+
+  const displayTimeline = useMemo(() => {
+    const breaks = computeDayBreaks(displayDay.items);
+    type Row =
+      | { kind: 'lesson'; sortKey: number; item: TimetableItemDTO }
+      | { kind: 'break'; sortKey: number; brk: (typeof breaks)[number] };
+    const rows: Row[] = [
+      ...displayDay.items.map((item) => ({
+        kind: 'lesson' as const,
+        sortKey: new Date(item.startDate).getTime(),
+        item,
+      })),
+      ...breaks.map((brk) => ({
+        kind: 'break' as const,
+        sortKey: brk.startDate.getTime(),
+        brk,
+      })),
+    ];
+    return rows.sort((a, b) => a.sortKey - b.sortKey);
+  }, [displayDay.items]);
 
   const nextLesson = useMemo(() => {
     const active = timetableItems.filter((c) => !c.canceled);
     const current = active.find(
-      (c) => now.getTime() >= new Date(c.startDate).getTime() && now.getTime() <= new Date(c.endDate).getTime()
+      (c) =>
+        now.getTime() >= new Date(c.startDate).getTime() &&
+        now.getTime() < new Date(c.endDate).getTime()
     );
-    if (current) return { label: 'En cours', item: current };
-    const upcoming = active.find((c) => new Date(c.startDate).getTime() > now.getTime());
-    return upcoming ? { label: `Prochain · ${formatTime(upcoming.startDate)}`, item: upcoming } : null;
-  }, [timetableItems]);
+    if (current) {
+      const t = getLessonTemporalState(current, now);
+      return {
+        isLive: true,
+        label: `En cours · ${t.minsLeft} min restantes`,
+        progress: t.progressPct,
+        item: current,
+      };
+    }
+    const upcoming = active.find(
+      (c) => !isWeekend(new Date(c.startDate)) && new Date(c.startDate).getTime() > now.getTime()
+    );
+    return upcoming
+      ? {
+          isLive: false,
+          label: `Prochain · ${formatDateRelative(upcoming.startDate)} ${formatTime(
+            upcoming.startDate
+          )}`,
+          progress: 0,
+          item: upcoming,
+        }
+      : null;
+  }, [timetableItems, now]);
 
   const urgentHw = useMemo(() => {
     const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
     return homework
       .filter((h) => !h.done && new Date(h.deadline).getTime() >= startToday)
       .slice(0, 4);
-  }, [homework]);
+  }, [homework, now]);
 
   return (
     <div className="p-4 space-y-4">
@@ -106,18 +265,32 @@ export const MobileDashboard: React.FC<{
         <h1 className="text-xl font-bold text-white mt-0.5">Salut, {profile.firstName}</h1>
       </div>
 
+      {/* Droit à la déconnexion banner (only when active) */}
+      <MobileRightToDisconnectNote serverDisabled={messagingDisabled} onlyWhenActive />
+
       {/* Live Next Class */}
       {nextLesson && (
         <button
           onClick={() => onNavigate('timetable')}
-          className="w-full p-3.5 rounded-2xl bg-[#111119] border border-white/[0.08] flex items-center gap-3 text-left"
+          className={`w-full p-3.5 rounded-2xl border flex items-center gap-3 text-left ${
+            nextLesson.isLive
+              ? 'bg-accent/[0.11] border-accent/45 shadow-glow'
+              : 'bg-[#111119] border-white/[0.08]'
+          }`}
         >
           <div
-            className="w-1.5 h-11 rounded-full shrink-0"
+            className="w-1.5 h-12 rounded-full shrink-0"
             style={{ backgroundColor: normalizeHexColor(nextLesson.item.backgroundColor) }}
           />
           <div className="min-w-0 flex-1">
-            <div className="text-[10.5px] font-bold uppercase tracking-wider text-accent">
+            <div
+              className={`text-[10.5px] font-bold uppercase tracking-wider flex items-center gap-1.5 ${
+                nextLesson.isLive ? 'text-emerald-300' : 'text-accent'
+              }`}
+            >
+              {nextLesson.isLive && (
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              )}
               {nextLesson.label}
             </div>
             <div className="text-sm font-bold text-white truncate">{nextLesson.item.title}</div>
@@ -125,6 +298,14 @@ export const MobileDashboard: React.FC<{
               {nextLesson.item.classrooms.join(', ') || 'Salle non précisée'}
               {nextLesson.item.teachers[0] ? ` · ${nextLesson.item.teachers[0]}` : ''}
             </div>
+            {nextLesson.isLive && (
+              <div className="w-full h-1 rounded-full bg-black/40 mt-2 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-emerald-400"
+                  style={{ width: `${nextLesson.progress}%` }}
+                />
+              </div>
+            )}
           </div>
         </button>
       )}
@@ -166,39 +347,107 @@ export const MobileDashboard: React.FC<{
         </button>
       </div>
 
-      {/* Today's Classes */}
-      <section className="rounded-2xl bg-[#0D0D13] border border-white/[0.06] p-4 space-y-2.5">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-bold text-white">Cours aujourd'hui</h2>
-          <button onClick={() => onNavigate('timetable')} className="text-xs text-accent">
+      {/* Smart Day Classes (auto-advances to tomorrow / Monday once today ends!) */}
+      <section className="rounded-2xl bg-[#0D0D13] border border-white/[0.06] p-4 space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <h2 className="text-sm font-bold text-white">{displayDay.title}</h2>
+            {displayDay.subtitle && (
+              <div className="text-[10.5px] text-emerald-300/85 mt-0.5">{displayDay.subtitle}</div>
+            )}
+          </div>
+          <button onClick={() => onNavigate('timetable')} className="text-xs text-accent shrink-0">
             Semaine
           </button>
         </div>
-        {todayItems.length === 0 ? (
-          <p className="text-xs text-zinc-500 py-3 text-center">Aucun cours aujourd'hui.</p>
+        {displayDay.items.length === 0 ? (
+          <p className="text-xs text-zinc-500 py-3 text-center">Aucun cours prévu.</p>
         ) : (
-          todayItems.map((c) => (
-            <div
-              key={c.id}
-              className="p-2.5 rounded-xl bg-[#14141D] border border-white/[0.05] flex items-center gap-3"
-            >
-              <div className="text-[11px] font-semibold text-zinc-300 w-10 tabular-nums shrink-0">
-                {formatTime(c.startDate)}
-              </div>
+          displayTimeline.map((row) => {
+            if (row.kind === 'break') {
+              const isLunch = row.brk.kind === 'lunch';
+              return (
+                <div
+                  key={row.brk.id}
+                  className={`px-3 py-2 rounded-xl border border-dashed flex items-center justify-between text-[11px] ${
+                    isLunch
+                      ? 'bg-amber-500/[0.08] border-amber-400/30 text-amber-300'
+                      : 'bg-white/[0.02] border-white/[0.08] text-zinc-400'
+                  }`}
+                >
+                  <span className="inline-flex items-center gap-1.5 font-semibold">
+                    {isLunch ? (
+                      <UtensilsCrossed className="w-3.5 h-3.5" />
+                    ) : (
+                      <Coffee className="w-3 h-3" />
+                    )}
+                    {isLunch ? 'Pause déjeuner' : 'Pause'}
+                  </span>
+                  <span className="tabular-nums opacity-85">
+                    {formatTime(row.brk.startDate.toISOString())} –{' '}
+                    {formatTime(row.brk.endDate.toISOString())}
+                  </span>
+                </div>
+              );
+            }
+
+            const c = row.item;
+            const color = normalizeHexColor(c.backgroundColor);
+            const temporal = getLessonTemporalState(c, now);
+            const isCurrent = temporal.state === 'current';
+            const isPast = temporal.state === 'past';
+
+            return (
               <div
-                className="w-1 h-7 rounded-full shrink-0"
-                style={{ backgroundColor: c.canceled ? '#f43f5e' : normalizeHexColor(c.backgroundColor) }}
-              />
-              <div className="min-w-0 flex-1">
-                <div className={`text-xs font-semibold truncate ${c.canceled ? 'line-through text-zinc-500' : 'text-white'}`}>
-                  {c.title}
+                key={c.id}
+                className={`p-2.5 rounded-xl border flex items-center gap-3 ${
+                  c.canceled
+                    ? 'bg-rose-500/[0.05] border-rose-500/20 opacity-70'
+                    : isCurrent
+                    ? 'bg-accent/[0.13] border-accent/50'
+                    : isPast
+                    ? 'bg-[#0F0F14]/70 border-white/[0.04] opacity-55'
+                    : 'bg-[#14141D] border-white/[0.06]'
+                }`}
+              >
+                <div className="text-[11px] w-11 text-right tabular-nums shrink-0 leading-tight">
+                  <div className={`font-bold ${isPast ? 'text-zinc-500' : 'text-zinc-100'}`}>
+                    {formatTime(c.startDate)}
+                  </div>
+                  <div className="text-[10px] text-zinc-500">{formatTime(c.endDate)}</div>
                 </div>
-                <div className="text-[11px] text-zinc-400 truncate">
-                  {c.canceled ? c.status || 'Annulé' : c.classrooms.join(', ')}
+                <div
+                  className="w-1 h-8 rounded-full shrink-0"
+                  style={{
+                    backgroundColor: c.canceled ? '#f43f5e' : isPast ? '#52525b' : color,
+                  }}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <div
+                      className={`text-xs font-semibold truncate ${
+                        c.canceled
+                          ? 'line-through text-zinc-500'
+                          : isPast
+                          ? 'text-zinc-400'
+                          : 'text-white'
+                      }`}
+                    >
+                      {c.title}
+                    </div>
+                    {isCurrent && (
+                      <span className="px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[9px] font-bold shrink-0">
+                        EN COURS
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-zinc-400 truncate">
+                    {c.canceled ? c.status || 'Annulé' : c.classrooms.join(', ')}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </section>
 
@@ -240,29 +489,45 @@ export const MobileDashboard: React.FC<{
   );
 };
 
-/* ================= TIMETABLE + COURSE DETAIL BOTTOM SHEET ================= */
+/* ================= TIMETABLE + COURSE DETAIL BOTTOM SHEET (PRONOTE STYLE) ================= */
 export const MobileTimetable: React.FC<{
   timetable: TimetableResponse | null;
   homework: HomeworkDTO[];
   selectedDate: Date;
   loading: boolean;
+  autoAdvanceNote?: string | null;
   onChangeDate: (d: Date) => void;
   onToggleHomework: (id: string, done: boolean) => void;
-}> = ({ timetable, homework, selectedDate, loading, onChangeDate, onToggleHomework }) => {
+}> = ({
+  timetable,
+  homework,
+  selectedDate,
+  loading,
+  autoAdvanceNote,
+  onChangeDate,
+  onToggleHomework,
+}) => {
+  const [now, setNow] = useState(() => new Date());
   const [selectedItem, setSelectedItem] = useState<TimetableItemDTO | null>(null);
   const [detailsCache, setDetailsCache] = useState<Record<string, LessonDetailsDTO | null>>({});
   const [loadingDetails, setLoadingDetails] = useState(false);
 
-  const monday = useMemo(() => {
-    const d = new Date(selectedDate);
-    d.setDate(d.getDate() + (d.getDay() === 0 ? -6 : 1 - d.getDay()));
-    d.setHours(0, 0, 0, 0);
-    return d;
-  }, [selectedDate]);
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(id);
+  }, []);
 
+  const effectiveDate = useMemo(
+    () => (isWeekend(selectedDate) ? getNextSchoolDay(selectedDate) : selectedDate),
+    [selectedDate]
+  );
+
+  const monday = useMemo(() => getMondayOfWeek(effectiveDate), [effectiveDate]);
+
+  // Strictly Monday -> Friday (no Saturday / Sunday!)
   const weekDays = useMemo(
     () =>
-      Array.from({ length: 6 }, (_, i) => {
+      Array.from({ length: 5 }, (_, i) => {
         const d = new Date(monday);
         d.setDate(monday.getDate() + i);
         return d;
@@ -272,9 +537,31 @@ export const MobileTimetable: React.FC<{
 
   const dayItems = useMemo(
     () =>
-      (timetable?.items ?? []).filter((item) => isSameDay(new Date(item.startDate), selectedDate)),
-    [timetable, selectedDate]
+      (timetable?.items ?? [])
+        .filter((item) => isSameDay(new Date(item.startDate), effectiveDate))
+        .sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime()),
+    [timetable, effectiveDate]
   );
+
+  const timelineRows = useMemo(() => {
+    const breaks = computeDayBreaks(dayItems);
+    type Row =
+      | { kind: 'lesson'; sortKey: number; item: TimetableItemDTO }
+      | { kind: 'break'; sortKey: number; brk: (typeof breaks)[number] };
+    const rows: Row[] = [
+      ...dayItems.map((item) => ({
+        kind: 'lesson' as const,
+        sortKey: new Date(item.startDate).getTime(),
+        item,
+      })),
+      ...breaks.map((brk) => ({
+        kind: 'break' as const,
+        sortKey: brk.startDate.getTime(),
+        brk,
+      })),
+    ];
+    return rows.sort((a, b) => a.sortKey - b.sortKey);
+  }, [dayItems]);
 
   useEffect(() => {
     const resId = selectedItem?.lessonResourceID;
@@ -296,28 +583,31 @@ export const MobileTimetable: React.FC<{
 
   const details = selectedItem?.lessonResourceID ? detailsCache[selectedItem.lessonResourceID] : null;
   const shiftWeek = (delta: number) => {
-    const next = new Date(selectedDate);
+    const next = new Date(effectiveDate);
     next.setDate(next.getDate() + delta * 7);
     onChangeDate(next);
   };
 
   return (
-    <div className="p-4 space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <h1 className="text-lg font-bold text-white">Emploi du temps</h1>
+    <div className="p-4 space-y-3.5">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <h1 className="text-lg font-bold text-white truncate">Emploi du temps</h1>
           {timetable?.weekFrequency && (
-            <span className="px-2 py-0.5 rounded-full text-[10.5px] font-semibold bg-accent/15 text-accent">
+            <span className="px-2 py-0.5 rounded-full text-[10.5px] font-semibold bg-accent/15 text-accent shrink-0">
               {timetable.weekFrequency}
             </span>
           )}
-          {loading && <Loader2 className="w-4 h-4 text-accent animate-spin" />}
+          {loading && <Loader2 className="w-4 h-4 text-accent animate-spin shrink-0" />}
         </div>
-        <div className="flex items-center gap-1 bg-[#0F0F16] border border-white/[0.07] rounded-xl p-1">
+        <div className="flex items-center gap-1 bg-[#0F0F16] border border-white/[0.07] rounded-xl p-1 shrink-0">
           <button onClick={() => shiftWeek(-1)} className="p-1 text-zinc-400">
             <ChevronLeft className="w-4 h-4" />
           </button>
-          <button onClick={() => onChangeDate(new Date())} className="px-2 text-[11px] text-zinc-200">
+          <button
+            onClick={() => onChangeDate(getInitialSchoolDate(new Date()))}
+            className="px-2 text-[11px] font-medium text-zinc-200"
+          >
             Auj.
           </button>
           <button onClick={() => shiftWeek(1)} className="p-1 text-zinc-400">
@@ -326,76 +616,280 @@ export const MobileTimetable: React.FC<{
         </div>
       </div>
 
-      {/* Day pills */}
-      <div className="grid grid-cols-6 gap-1.5">
-        {weekDays.map((d) => {
-          const active = isSameDay(d, selectedDate);
-          const labels = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'];
-          const dayIdx = d.getDay() === 0 ? 6 : d.getDay() - 1;
+      {autoAdvanceNote && (
+        <div className="px-3 py-1.5 rounded-xl bg-emerald-500/12 border border-emerald-500/25 text-[11px] text-emerald-300 flex items-center justify-between gap-2">
+          <span className="inline-flex items-center gap-1.5 font-medium">
+            <Sparkles className="w-3.5 h-3.5 shrink-0" />
+            {autoAdvanceNote}
+          </span>
+          {!isWeekend(now) && !isSameDay(effectiveDate, now) && (
+            <button
+              onClick={() => onChangeDate(new Date())}
+              className="underline underline-offset-2 font-semibold text-emerald-200 shrink-0"
+            >
+              Voir auj.
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* 5-day Mon-Fri Picker (No Sat / Sun!) */}
+      <div className="grid grid-cols-5 gap-1.5">
+        {weekDays.map((d, idx) => {
+          const active = isSameDay(d, effectiveDate);
+          const isToday = isSameDay(d, now);
+          const labels = ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven'];
           return (
             <button
               key={d.toISOString()}
               onClick={() => onChangeDate(d)}
-              className={`py-2 rounded-xl border text-center transition-all ${
+              className={`py-2 rounded-xl border text-center transition-all relative ${
                 active
-                  ? 'bg-accent text-black border-accent font-bold'
+                  ? 'bg-accent text-black border-accent font-bold shadow-glow'
+                  : isToday
+                  ? 'bg-accent/10 border-accent/35 text-accent font-semibold'
                   : 'bg-[#0E0E15] border-white/[0.06] text-zinc-400'
               }`}
             >
-              <div className="text-[10px]">{labels[dayIdx]}</div>
+              <div className="text-[10.5px]">{labels[idx]}</div>
               <div className="text-xs font-bold mt-0.5 tabular-nums">{d.getDate()}</div>
             </button>
           );
         })}
       </div>
 
-      {/* Course cards */}
+      {/* Selected Day Header */}
+      <div className="flex items-center justify-between px-0.5 text-[11.5px] text-zinc-400">
+        <span className="capitalize font-semibold text-zinc-200">
+          {formatDateFull(effectiveDate.toISOString())}
+        </span>
+        <span className="tabular-nums">
+          {dayItems.filter((i) => !i.canceled).length} cours
+        </span>
+      </div>
+
+      {/* PRONOTE-Style Vertical Timeline with Lunch Break + Active Highlight + Past Grayout */}
       <div className="space-y-2.5">
         {dayItems.length === 0 ? (
           <div className="rounded-2xl bg-[#0D0D13] border border-white/[0.06] py-12 text-center text-xs text-zinc-500">
             Aucun cours ce jour.
           </div>
         ) : (
-          dayItems.map((item) => {
-            const color = item.canceled ? '#f43f5e' : normalizeHexColor(item.backgroundColor);
+          timelineRows.map((row) => {
+            if (row.kind === 'break') {
+              const isLunch = row.brk.kind === 'lunch';
+              const isPastBreak = now.getTime() >= row.brk.endDate.getTime();
+              const isNowBreak =
+                now.getTime() >= row.brk.startDate.getTime() &&
+                now.getTime() < row.brk.endDate.getTime();
+
+              return (
+                <div
+                  key={row.brk.id}
+                  style={{
+                    backgroundImage: isLunch
+                      ? 'repeating-linear-gradient(-45deg, rgba(251,191,36,0.09) 0px, rgba(251,191,36,0.09) 6px, rgba(251,191,36,0.02) 6px, rgba(251,191,36,0.02) 12px)'
+                      : 'repeating-linear-gradient(-45deg, rgba(255,255,255,0.03) 0px, rgba(255,255,255,0.03) 6px, transparent 6px, transparent 12px)',
+                  }}
+                  className={`rounded-2xl border border-dashed px-3.5 py-2.5 flex items-center gap-3 ${
+                    isLunch
+                      ? isNowBreak
+                        ? 'border-amber-400/65 ring-1 ring-amber-400/30'
+                        : isPastBreak
+                        ? 'border-amber-400/20 opacity-55'
+                        : 'border-amber-400/40'
+                      : isPastBreak
+                      ? 'border-white/[0.05] opacity-45'
+                      : 'border-white/[0.1]'
+                  }`}
+                >
+                  <div className="w-12 text-right shrink-0 tabular-nums leading-tight">
+                    <div
+                      className={`text-[11px] font-bold ${
+                        isLunch ? 'text-amber-300' : 'text-zinc-400'
+                      }`}
+                    >
+                      {formatTime(row.brk.startDate.toISOString())}
+                    </div>
+                    <div className="text-[10px] text-zinc-500">
+                      {formatTime(row.brk.endDate.toISOString())}
+                    </div>
+                  </div>
+                  <div
+                    className={`w-7 h-7 rounded-xl flex items-center justify-center shrink-0 ${
+                      isLunch
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-400/30'
+                        : 'bg-white/[0.05] text-zinc-400'
+                    }`}
+                  >
+                    {isLunch ? (
+                      <UtensilsCrossed className="w-3.5 h-3.5" />
+                    ) : (
+                      <Coffee className="w-3.5 h-3.5" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div
+                      className={`text-xs font-bold ${
+                        isLunch ? 'text-amber-200' : 'text-zinc-300'
+                      }`}
+                    >
+                      {isLunch ? 'Pause déjeuner' : 'Pause / Permanence'}
+                    </div>
+                    <div className="text-[11px] text-zinc-400 tabular-nums">
+                      Durée : {formatDurationMinutes(row.brk.durationMinutes)}
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
+            const item = row.item;
+            const rawColor = normalizeHexColor(item.backgroundColor);
+            const temporal = getLessonTemporalState(item, now);
+            const isCurrent = temporal.state === 'current';
+            const isPast = temporal.state === 'past';
+            const durationMins = Math.max(
+              15,
+              Math.round(
+                (new Date(item.endDate).getTime() - new Date(item.startDate).getTime()) / 60_000
+              )
+            );
+            const barColor = item.canceled ? '#f43f5e' : isPast ? '#52525b' : rawColor;
+
             return (
               <button
                 key={item.id}
                 onClick={() => setSelectedItem(item)}
-                className={`w-full p-3.5 rounded-2xl border text-left flex items-center gap-3 active:scale-[0.99] transition-transform ${
+                style={
+                  isCurrent
+                    ? {
+                        backgroundColor: hexToRgba(rawColor, 0.16),
+                        borderColor: hexToRgba(rawColor, 0.6),
+                        boxShadow: `0 0 22px -8px ${hexToRgba(rawColor, 0.7)}`,
+                      }
+                    : undefined
+                }
+                className={`w-full p-3.5 rounded-2xl border text-left flex items-stretch gap-3 active:scale-[0.99] transition-all ${
                   item.canceled
                     ? 'bg-rose-500/[0.05] border-rose-500/20 opacity-75'
-                    : 'bg-[#101018] border-white/[0.07]'
+                    : isCurrent
+                    ? 'ring-1 ring-white/15'
+                    : isPast
+                    ? 'bg-[#0E0E13]/80 border-white/[0.04] opacity-55'
+                    : 'bg-[#11111A] border-white/[0.08]'
                 }`}
               >
-                <div className="w-11 text-right shrink-0 tabular-nums">
-                  <div className="text-xs font-bold text-white">{formatTime(item.startDate)}</div>
-                  <div className="text-[10.5px] text-zinc-500">{formatTime(item.endDate)}</div>
+                {/* Crisp Start -> End Time Gutter */}
+                <div className="w-12 flex flex-col justify-between items-end shrink-0 tabular-nums py-0.5">
+                  <div
+                    className={`text-xs font-extrabold leading-none ${
+                      isCurrent ? 'text-white' : isPast ? 'text-zinc-500' : 'text-zinc-100'
+                    }`}
+                  >
+                    {formatTime(item.startDate)}
+                  </div>
+                  <div className="text-[9.5px] text-zinc-500 my-1">
+                    {formatDurationMinutes(durationMins)}
+                  </div>
+                  <div
+                    className={`text-[11px] font-semibold leading-none ${
+                      isPast ? 'text-zinc-600' : 'text-zinc-400'
+                    }`}
+                  >
+                    {formatTime(item.endDate)}
+                  </div>
                 </div>
-                <div className="w-1 self-stretch rounded-full shrink-0" style={{ backgroundColor: color }} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className={`text-sm font-bold truncate ${item.canceled ? 'line-through text-zinc-400' : 'text-white'}`}>
-                      {item.title}
-                    </span>
-                    {item.lessonResourceID && !item.canceled && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-accent shrink-0" />
-                    )}
-                    {item.test && (
-                      <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[9.5px] font-bold">
-                        DS
+
+                {/* Subject Color Strip */}
+                <div
+                  className="w-1.5 rounded-full shrink-0"
+                  style={{ backgroundColor: barColor }}
+                />
+
+                {/* Course Content */}
+                <div className="min-w-0 flex-1 flex flex-col justify-between gap-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span
+                        className={`text-[14px] font-bold truncate ${
+                          item.canceled
+                            ? 'line-through text-zinc-400'
+                            : isPast
+                            ? 'text-zinc-400'
+                            : 'text-white'
+                        }`}
+                      >
+                        {item.title}
+                      </span>
+                      {item.lessonResourceID && !item.canceled && !isCurrent && (
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                            isPast ? 'bg-zinc-600' : 'bg-accent'
+                          }`}
+                        />
+                      )}
+                      {item.test && (
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[9.5px] font-bold shrink-0 ${
+                            isPast
+                              ? 'bg-zinc-800 text-zinc-500'
+                              : 'bg-amber-500/20 text-amber-300'
+                          }`}
+                        >
+                          DS
+                        </span>
+                      )}
+                    </div>
+
+                    {isCurrent && (
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-400/20 text-emerald-300 border border-emerald-400/40 text-[9.5px] font-extrabold shrink-0 inline-flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                        EN COURS
                       </span>
                     )}
                   </div>
-                  <div className="text-xs text-zinc-400 mt-0.5 truncate">
+
+                  <div className={`text-xs truncate ${isPast ? 'text-zinc-500' : 'text-zinc-300'}`}>
                     {item.canceled || item.status ? (
-                      <span className={item.canceled ? 'text-rose-300 font-medium' : 'text-amber-300'}>
-                        {item.status || 'Cours annulé'} ·{' '}
+                      <span
+                        className={
+                          item.canceled
+                            ? 'text-rose-300 font-semibold'
+                            : isPast
+                            ? 'text-zinc-500'
+                            : 'text-amber-300 font-medium'
+                        }
+                      >
+                        {item.status || 'Cours annulé'}
+                        {item.classrooms.length > 0 ? ' · ' : ''}
                       </span>
                     ) : null}
-                    {item.classrooms.join(', ')}
-                    {item.teachers[0] ? ` · ${item.teachers[0]}` : ''}
+                    {item.classrooms.length > 0 && `Salle ${item.classrooms.join(', ')}`}
                   </div>
+
+                  {item.teachers[0] && (
+                    <div className={`text-[11px] truncate ${isPast ? 'text-zinc-600' : 'text-zinc-400'}`}>
+                      {item.teachers[0]}
+                    </div>
+                  )}
+
+                  {isCurrent && (
+                    <div className="pt-1 space-y-1">
+                      <div className="w-full h-1.5 rounded-full bg-black/40 overflow-hidden">
+                        <div
+                          className="h-full rounded-full"
+                          style={{
+                            width: `${temporal.progressPct}%`,
+                            backgroundColor: rawColor,
+                          }}
+                        />
+                      </div>
+                      <div className="text-[10px] text-emerald-200/80 font-medium">
+                        Encore {temporal.minsLeft} min
+                      </div>
+                    </div>
+                  )}
                 </div>
               </button>
             );
@@ -577,6 +1071,8 @@ export const MobileHomework: React.FC<{
         </div>
       </div>
 
+      <MobileRightToDisconnectNote />
+
       {grouped.length === 0 ? (
         <div className="rounded-2xl bg-[#0D0D13] border border-white/[0.06] py-14 text-center text-xs text-zinc-500">
           Aucun devoir dans cette catégorie.
@@ -728,6 +1224,8 @@ export const MobileGrades: React.FC<{
       </div>
 
       {/* Overall Card */}
+      <MobileRightToDisconnectNote />
+
       <div className="p-4 rounded-2xl bg-[#0E0E15] border border-white/[0.07] flex items-center justify-between">
         <div>
           <div className="text-xs text-zinc-400">
@@ -939,8 +1437,10 @@ export const MobileAttendance: React.FC<{
 export const MobileMessages: React.FC<{
   news: NewsItemDTO[];
   discussions: DiscussionSummaryDTO[];
+  messagingDisabled?: boolean;
+  onNewsDetailLoaded?: (item: NewsItemDTO) => void;
   onRefresh: () => Promise<void>;
-}> = ({ news, discussions, onRefresh }) => {
+}> = ({ news, discussions, messagingDisabled = false, onNewsDetailLoaded, onRefresh }) => {
   const [sub, setSub] = useState<'news' | 'discussions'>('news');
   const [openNews, setOpenNews] = useState<NewsItemDTO | null>(null);
   const [loadingNewsDetail, setLoadingNewsDetail] = useState(false);
@@ -978,6 +1478,8 @@ export const MobileMessages: React.FC<{
         </div>
       </div>
 
+      <MobileRightToDisconnectNote serverDisabled={messagingDisabled} />
+
       {sub === 'news' ? (
         news.length === 0 ? (
           <div className="py-14 text-center text-xs text-zinc-500">Aucune info ou sondage.</div>
@@ -996,12 +1498,16 @@ export const MobileMessages: React.FC<{
                       if (full) {
                         active = full;
                         setOpenNews(full);
+                        onNewsDetailLoaded?.(full);
                       }
                     } finally {
                       setLoadingNewsDetail(false);
                     }
                   }
-                  if (!active.read) mobilePronote.markNewsRead(active.id).catch(() => {});
+                  if (!active.read) {
+                    onNewsDetailLoaded?.({ ...active, read: true });
+                    mobilePronote.markNewsRead(active.id).catch(() => {});
+                  }
                   if (active.is === 'survey' && active.questions) {
                     const init: Record<string, { selectedAnswers?: number[]; textInputAnswer?: string }> = {};
                     for (const q of active.questions) {

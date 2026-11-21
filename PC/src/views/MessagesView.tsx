@@ -18,11 +18,13 @@ import type {
   NewsItemDTO,
 } from '@shared/types';
 import { formatDateFull, formatDateRelative, formatTime, sanitizeHtml } from '@/utils/format';
+import { RightToDisconnectNote } from '../components/RightToDisconnectNote';
 
 interface MessagesViewProps {
   news: NewsItemDTO[];
   discussions: DiscussionSummaryDTO[];
   loading: boolean;
+  messagingDisabled?: boolean;
   onMarkNewsRead: (id: string) => void;
   onNewsDetailLoaded: (item: NewsItemDTO) => void;
   onRefreshAllMessages: () => Promise<void>;
@@ -32,6 +34,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   news,
   discussions,
   loading,
+  messagingDisabled = false,
   onMarkNewsRead,
   onNewsDetailLoaded,
   onRefreshAllMessages,
@@ -255,6 +258,9 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Droit à la déconnexion info */}
+      <RightToDisconnectNote serverDisabled={messagingDisabled} className="shrink-0" />
 
       {/* Split Pane */}
       <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-4">

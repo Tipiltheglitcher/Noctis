@@ -17,6 +17,7 @@ import {
   sanitizeHtml,
   toDateKey,
 } from '@/utils/format';
+import { RightToDisconnectNote } from '../components/RightToDisconnectNote';
 
 interface HomeworkViewProps {
   homework: HomeworkDTO[];
@@ -134,6 +135,8 @@ export const HomeworkView: React.FC<HomeworkViewProps> = ({
       </div>
 
       {/* Search & Subject Filter */}
+      <RightToDisconnectNote />
+
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[220px]">
           <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />

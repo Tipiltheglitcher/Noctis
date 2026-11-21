@@ -17,6 +17,9 @@ import {
   Circle,
   Clock,
   FileText,
+  UtensilsCrossed,
+  Coffee,
+  Sparkles,
 } from 'lucide-react';
 import type {
   HomeworkDTO,
@@ -33,12 +36,22 @@ import {
   normalizeHexColor,
   sanitizeHtml,
 } from '@/utils/format';
+import {
+  computeDayBreaks,
+  getInitialSchoolDate,
+  getLessonTemporalState,
+  getMondayOfWeek,
+  getNextSchoolDay,
+  getPrevSchoolDay,
+  isWeekend,
+} from '@/utils/schoolTime';
 
 interface TimetableViewProps {
   timetable: TimetableResponse | null;
   homework: HomeworkDTO[];
   selectedDate: Date;
   loading: boolean;
+  autoAdvanceNote?: string | null;
   onChangeDate: (date: Date) => void;
   onToggleHomework: (id: string, done: boolean) => void;
 }
@@ -48,18 +61,32 @@ interface PopoverState {
   rect: { top: number; left: number; right: number; bottom: number; width: number; height: number };
 }
 
-const DAY_NAMES = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'];
-const HOUR_HEIGHT = 68;
+const DAY_NAMES = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi'];
+const HOUR_HEIGHT = 74;
 const POPOVER_WIDTH = 390;
+
+function hexToRgba(hex: string, alpha: number): string {
+  const clean = hex.replace('#', '');
+  if (clean.length !== 6) return `rgba(139, 116, 255, ${alpha})`;
+  const r = parseInt(clean.slice(0, 2), 16);
+  const g = parseInt(clean.slice(2, 4), 16);
+  const b = parseInt(clean.slice(4, 6), 16);
+  if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) {
+    return `rgba(139, 116, 255, ${alpha})`;
+  }
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
 
 export const TimetableView: React.FC<TimetableViewProps> = ({
   timetable,
   homework,
   selectedDate,
   loading,
+  autoAdvanceNote,
   onChangeDate,
   onToggleHomework,
 }) => {
+  const [now, setNow] = useState(() => new Date());
   const [popover, setPopover] = useState<PopoverState | null>(null);
   const [viewMode, setViewMode] = useState<'week' | 'day'>(() =>
     typeof window !== 'undefined' && window.innerWidth < 768 ? 'day' : 'week'
@@ -67,6 +94,12 @@ export const TimetableView: React.FC<TimetableViewProps> = ({
   const [lessonCache, setLessonCache] = useState<Record<string, LessonDetailsDTO | null>>({});
   const [loadingDetails, setLoadingDetails] = useState(false);
   const popoverRef = useRef<HTMLDivElement | null>(null);
+
+  // Tick every 30s so active/past courses and current time line stay live
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(id);
+  }, []);
 
   // Close popover on Escape or outside click
   useEffect(() => {
@@ -125,30 +158,21 @@ export const TimetableView: React.FC<TimetableViewProps> = ({
     };
   }, [popover?.item.lessonResourceID, lessonCache]);
 
-  const monday = useMemo(() => {
-    const d = new Date(selectedDate);
-    const day = d.getDay();
-    const diff = day === 0 ? -6 : 1 - day;
-    d.setDate(d.getDate() + diff);
-    d.setHours(0, 0, 0, 0);
-    return d;
-  }, [selectedDate]);
+  const effectiveDate = useMemo(
+    () => (isWeekend(selectedDate) ? getNextSchoolDay(selectedDate) : selectedDate),
+    [selectedDate]
+  );
 
-  const hasSaturdayClasses = useMemo(() => {
-    if (!timetable) return false;
-    const sat = new Date(monday);
-    sat.setDate(monday.getDate() + 5);
-    return timetable.items.some((i) => isSameDay(new Date(i.startDate), sat));
-  }, [timetable, monday]);
+  const monday = useMemo(() => getMondayOfWeek(effectiveDate), [effectiveDate]);
 
+  // Always Monday -> Friday (no Saturday / Sunday clutter!)
   const weekDays = useMemo(() => {
-    const count = hasSaturdayClasses ? 6 : 5;
-    return Array.from({ length: count }, (_, idx) => {
+    return Array.from({ length: 5 }, (_, idx) => {
       const d = new Date(monday);
       d.setDate(monday.getDate() + idx);
       return d;
     });
-  }, [monday, hasSaturdayClasses]);
+  }, [monday]);
 
   const { startHour, endHour } = useMemo(() => {
     let minH = 8;
@@ -169,29 +193,27 @@ export const TimetableView: React.FC<TimetableViewProps> = ({
 
   const shiftWeek = (deltaWeeks: number) => {
     setPopover(null);
-    const next = new Date(selectedDate);
+    const next = new Date(effectiveDate);
     next.setDate(next.getDate() + deltaWeeks * 7);
     onChangeDate(next);
   };
 
   const shiftDay = (deltaDays: number) => {
     setPopover(null);
-    const next = new Date(selectedDate);
-    next.setDate(next.getDate() + deltaDays);
-    onChangeDate(next);
+    onChangeDate(deltaDays > 0 ? getNextSchoolDay(effectiveDate) : getPrevSchoolDay(effectiveDate));
   };
 
   const goToday = () => {
     setPopover(null);
-    onChangeDate(new Date());
+    onChangeDate(getInitialSchoolDate(new Date()));
   };
 
-  const now = new Date();
   const nowMinutesFromStart = (now.getHours() - startHour) * 60 + now.getMinutes();
   const showNowLine =
     nowMinutesFromStart >= 0 && nowMinutesFromStart <= (endHour - startHour) * 60;
 
-  const displayedDays = viewMode === 'week' ? weekDays : [selectedDate];
+  const displayedDays = viewMode === 'week' ? weekDays : [effectiveDate];
+  const todayVisibleInGrid = displayedDays.some((d) => isSameDay(d, now));
 
   const layoutDayItems = (items: TimetableItemDTO[]) => {
     const sorted = [...items].sort(
@@ -261,7 +283,6 @@ export const TimetableView: React.FC<TimetableViewProps> = ({
     });
   };
 
-  // Compute smart side-by-side floating popover position (or centered mobile sheet on phones)
   const popoverPosition = useMemo(() => {
     if (!popover) return null;
     const vw = window.innerWidth;
@@ -293,7 +314,6 @@ export const TimetableView: React.FC<TimetableViewProps> = ({
     return { left, top, width, maxHeight, side };
   }, [popover]);
 
-  // Combine resource-linked assignments + homework matching same subject & day
   const popoverDetails = popover?.item.lessonResourceID
     ? lessonCache[popover.item.lessonResourceID] ?? null
     : null;
@@ -328,14 +348,28 @@ export const TimetableView: React.FC<TimetableViewProps> = ({
   }, [popover, popoverDetails, homework]);
 
   return (
-    <div className="h-full flex flex-col p-5 lg:p-6 gap-4 animate-fade-in">
+    <div className="h-full flex flex-col p-4 sm:p-5 lg:p-6 gap-3.5 animate-fade-in">
       {/* Top Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3 shrink-0">
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2.5">
           <h1 className="text-xl font-bold text-white tracking-tight">Emploi du temps</h1>
           {timetable?.weekFrequency && (
             <span className="px-2.5 py-0.5 rounded-full text-[11.5px] font-semibold bg-accent/15 text-accent border border-accent/25">
               {timetable.weekFrequency}
+            </span>
+          )}
+          {autoAdvanceNote && (
+            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-emerald-500/12 text-emerald-300 border border-emerald-500/25 inline-flex items-center gap-1.5">
+              <Sparkles className="w-3 h-3" />
+              {autoAdvanceNote}
+              {!isWeekend(now) && !isSameDay(effectiveDate, now) && (
+                <button
+                  onClick={() => onChangeDate(new Date())}
+                  className="ml-1 underline underline-offset-2 text-emerald-200 hover:text-white"
+                >
+                  Voir auj.
+                </button>
+              )}
             </span>
           )}
           {loading && <Loader2 className="w-4 h-4 text-accent animate-spin" />}
@@ -395,7 +429,7 @@ export const TimetableView: React.FC<TimetableViewProps> = ({
                       day: 'numeric',
                       month: 'short',
                     })}`
-                  : formatDateFull(selectedDate.toISOString())}
+                  : formatDateFull(effectiveDate.toISOString())}
               </span>
             </button>
             <button
@@ -411,47 +445,63 @@ export const TimetableView: React.FC<TimetableViewProps> = ({
 
       {/* Calendar Container */}
       <div className="flex-1 min-h-0 rounded-2xl bg-[#0B0B10] border border-white/[0.06] flex flex-col overflow-hidden">
-        {/* Day Headers */}
+        {/* Day Headers (Mon - Fri) */}
         <div
-          className="grid border-b border-white/[0.06] bg-[#0E0E14] shrink-0 pr-[7px]"
+          className="grid border-b border-white/[0.07] bg-[#0E0E15] shrink-0 pr-[7px]"
           style={{
-            gridTemplateColumns: `56px repeat(${displayedDays.length}, minmax(0, 1fr))`,
+            gridTemplateColumns: `64px repeat(${displayedDays.length}, minmax(0, 1fr))`,
           }}
         >
-          <div className="h-12 border-r border-white/[0.05]" />
+          <div className="h-12 border-r border-white/[0.06] flex items-center justify-center text-[10px] font-semibold uppercase tracking-wider text-zinc-600">
+            Heure
+          </div>
           {displayedDays.map((day, i) => {
             const isToday = isSameDay(day, now);
+            const isSelectedDay = isSameDay(day, effectiveDate);
             const weekdayName =
               viewMode === 'week'
                 ? DAY_NAMES[i]
                 : day.toLocaleDateString('fr-FR', { weekday: 'long' });
             return (
-              <div
+              <button
                 key={day.toISOString()}
-                className={`h-12 px-3 flex items-center justify-center gap-2 border-r last:border-r-0 border-white/[0.05] ${
-                  isToday ? 'bg-accent/[0.08]' : ''
+                type="button"
+                onClick={() => {
+                  onChangeDate(day);
+                  if (viewMode === 'week') setPopover(null);
+                }}
+                className={`h-12 px-2 flex items-center justify-center gap-2 border-r last:border-r-0 border-white/[0.05] transition-colors ${
+                  isToday
+                    ? 'bg-accent/[0.11]'
+                    : isSelectedDay && viewMode === 'week'
+                    ? 'bg-white/[0.03]'
+                    : 'hover:bg-white/[0.02]'
                 }`}
               >
                 <span
-                  className={`text-xs font-medium capitalize ${
-                    isToday ? 'text-accent' : 'text-zinc-400'
+                  className={`text-xs font-semibold capitalize ${
+                    isToday ? 'text-accent' : isSelectedDay ? 'text-white' : 'text-zinc-400'
                   }`}
                 >
                   {weekdayName}
                 </span>
                 <span
-                  className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold tabular-nums ${
-                    isToday ? 'bg-accent text-black' : 'text-zinc-200'
+                  className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold tabular-nums ${
+                    isToday
+                      ? 'bg-accent text-black shadow-glow'
+                      : isSelectedDay
+                      ? 'bg-white/[0.12] text-white'
+                      : 'text-zinc-300'
                   }`}
                 >
                   {day.getDate()}
                 </span>
-              </div>
+              </button>
             );
           })}
         </div>
 
-        {/* Scrollable Grid */}
+        {/* Scrollable PRONOTE-style Grid */}
         <div
           className="flex-1 overflow-y-auto relative"
           onScroll={() => {
@@ -461,21 +511,43 @@ export const TimetableView: React.FC<TimetableViewProps> = ({
           <div
             className="grid relative"
             style={{
-              gridTemplateColumns: `56px repeat(${displayedDays.length}, minmax(0, 1fr))`,
-              height: `${(endHour - startHour) * HOUR_HEIGHT + 24}px`,
+              gridTemplateColumns: `64px repeat(${displayedDays.length}, minmax(0, 1fr))`,
+              height: `${(endHour - startHour) * HOUR_HEIGHT + 28}px`,
             }}
           >
-            {/* Time Ruler */}
-            <div className="relative border-r border-white/[0.05] select-none">
+            {/* Enhanced Time Ruler with crisp HHh00 + :30 ticks + live current time pill */}
+            <div className="relative border-r border-white/[0.06] bg-[#09090E] select-none">
               {hours.map((h) => (
-                <div
-                  key={h}
-                  className="absolute right-2.5 text-[11px] text-zinc-500 tabular-nums -translate-y-1/2"
-                  style={{ top: `${(h - startHour) * HOUR_HEIGHT + 12}px` }}
-                >
-                  {String(h).padStart(2, '0')}h
-                </div>
+                <React.Fragment key={h}>
+                  <div
+                    className="absolute right-2 text-[11px] font-semibold text-zinc-300 tabular-nums -translate-y-1/2 flex items-baseline"
+                    style={{ top: `${(h - startHour) * HOUR_HEIGHT + 14}px` }}
+                  >
+                    <span>{String(h).padStart(2, '0')}h</span>
+                    <span className="text-[9.5px] font-normal text-zinc-500">00</span>
+                  </div>
+                  {h < endHour && (
+                    <div
+                      className="absolute right-2 text-[9.5px] text-zinc-600 tabular-nums -translate-y-1/2"
+                      style={{ top: `${(h - startHour + 0.5) * HOUR_HEIGHT + 14}px` }}
+                    >
+                      :30
+                    </div>
+                  )}
+                </React.Fragment>
               ))}
+
+              {todayVisibleInGrid && showNowLine && (
+                <div
+                  className="absolute right-1 z-30 -translate-y-1/2 px-1.5 py-0.5 rounded-md bg-accent text-black text-[10px] font-extrabold tabular-nums shadow-glow"
+                  style={{ top: `${(nowMinutesFromStart / 60) * HOUR_HEIGHT + 14}px` }}
+                >
+                  {`${String(now.getHours()).padStart(2, '0')}h${String(now.getMinutes()).padStart(
+                    2,
+                    '0'
+                  )}`}
+                </div>
+              )}
             </div>
 
             {/* Day Columns */}
@@ -485,6 +557,7 @@ export const TimetableView: React.FC<TimetableViewProps> = ({
                 isSameDay(new Date(item.startDate), day)
               );
               const laidOut = layoutDayItems(dayItems);
+              const breaks = computeDayBreaks(dayItems);
 
               return (
                 <div
@@ -493,106 +566,265 @@ export const TimetableView: React.FC<TimetableViewProps> = ({
                     isToday ? 'bg-accent/[0.025]' : ''
                   }`}
                 >
+                  {/* Hour & Half-hour Gridlines */}
                   {hours.map((h) => (
-                    <div
-                      key={h}
-                      className="absolute left-0 right-0 border-t border-white/[0.04]"
-                      style={{ top: `${(h - startHour) * HOUR_HEIGHT + 12}px` }}
-                    />
+                    <React.Fragment key={h}>
+                      <div
+                        className="absolute left-0 right-0 border-t border-white/[0.06]"
+                        style={{ top: `${(h - startHour) * HOUR_HEIGHT + 14}px` }}
+                      />
+                      {h < endHour && (
+                        <div
+                          className="absolute left-0 right-0 border-t border-dashed border-white/[0.025]"
+                          style={{ top: `${(h - startHour + 0.5) * HOUR_HEIGHT + 14}px` }}
+                        />
+                      )}
+                    </React.Fragment>
                   ))}
 
+                  {/* Lunch Break & Free Gaps (crystal clear visual separation!) */}
+                  {breaks.map((b) => {
+                    const sMin = (b.startDate.getHours() - startHour) * 60 + b.startDate.getMinutes();
+                    const top = (sMin / 60) * HOUR_HEIGHT + 14 + 2;
+                    const height = Math.max(26, (b.durationMinutes / 60) * HOUR_HEIGHT - 4);
+                    const isLunch = b.kind === 'lunch';
+                    const isPastBreak = now.getTime() >= b.endDate.getTime();
+                    const isNowBreak =
+                      now.getTime() >= b.startDate.getTime() && now.getTime() < b.endDate.getTime();
+
+                    return (
+                      <div
+                        key={b.id}
+                        style={{
+                          top: `${top}px`,
+                          height: `${height}px`,
+                          backgroundImage: isLunch
+                            ? 'repeating-linear-gradient(-45deg, rgba(251,191,36,0.09) 0px, rgba(251,191,36,0.09) 6px, rgba(251,191,36,0.02) 6px, rgba(251,191,36,0.02) 12px)'
+                            : 'repeating-linear-gradient(-45deg, rgba(255,255,255,0.03) 0px, rgba(255,255,255,0.03) 6px, transparent 6px, transparent 12px)',
+                        }}
+                        className={`absolute left-1 right-1 z-[5] rounded-xl border border-dashed px-2.5 py-1 flex flex-col items-center justify-center text-center pointer-events-none select-none transition-opacity ${
+                          isLunch
+                            ? isNowBreak
+                              ? 'border-amber-400/60 ring-1 ring-amber-400/30'
+                              : isPastBreak
+                              ? 'border-amber-400/15 opacity-55'
+                              : 'border-amber-400/35'
+                            : isPastBreak
+                            ? 'border-white/[0.04] opacity-45'
+                            : 'border-white/[0.08]'
+                        }`}
+                      >
+                        <div
+                          className={`flex items-center gap-1.5 text-[11px] font-bold ${
+                            isLunch ? 'text-amber-300' : 'text-zinc-400'
+                          }`}
+                        >
+                          {isLunch ? (
+                            <UtensilsCrossed className="w-3.5 h-3.5 shrink-0" />
+                          ) : (
+                            <Coffee className="w-3 h-3 shrink-0" />
+                          )}
+                          <span className="truncate">
+                            {isLunch ? 'Pause déjeuner' : 'Pause'}
+                          </span>
+                        </div>
+                        {height >= 42 && (
+                          <div
+                            className={`text-[10px] tabular-nums mt-0.5 ${
+                              isLunch ? 'text-amber-200/75' : 'text-zinc-500'
+                            }`}
+                          >
+                            {formatTime(b.startDate.toISOString())} –{' '}
+                            {formatTime(b.endDate.toISOString())} ·{' '}
+                            {formatDurationMinutes(b.durationMinutes)}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {/* Live Current-Time Line */}
                   {isToday && showNowLine && (
                     <div
-                      className="absolute left-0 right-0 z-20 pointer-events-none flex items-center"
+                      className="absolute left-0 right-0 z-25 pointer-events-none flex items-center"
                       style={{
-                        top: `${(nowMinutesFromStart / 60) * HOUR_HEIGHT + 12}px`,
+                        top: `${(nowMinutesFromStart / 60) * HOUR_HEIGHT + 14}px`,
                       }}
                     >
-                      <div className="w-2 h-2 rounded-full bg-accent -ml-1 shadow-glow" />
-                      <div className="flex-1 h-[1.5px] bg-accent/80" />
+                      <div className="w-2.5 h-2.5 rounded-full bg-accent -ml-1.5 shadow-glow ring-2 ring-accent/30" />
+                      <div className="flex-1 h-[2px] bg-accent shadow-glow" />
                     </div>
                   )}
 
+                  {/* Courses */}
                   {laidOut.map(({ item, col, totalCols }) => {
                     const start = new Date(item.startDate);
                     const end = new Date(item.endDate);
                     const startMin = (start.getHours() - startHour) * 60 + start.getMinutes();
                     const durationMin = Math.max(25, (end.getTime() - start.getTime()) / 60_000);
-                    const top = (startMin / 60) * HOUR_HEIGHT + 12;
-                    const height = Math.max(32, (durationMin / 60) * HOUR_HEIGHT - 3);
+                    const top = (startMin / 60) * HOUR_HEIGHT + 14 + 1;
+                    const height = Math.max(36, (durationMin / 60) * HOUR_HEIGHT - 4);
                     const widthPct = 100 / totalCols;
                     const leftPct = col * widthPct;
-                    const accentColor = item.canceled
-                      ? '#f43f5e'
-                      : normalizeHexColor(item.backgroundColor);
+                    const rawColor = normalizeHexColor(item.backgroundColor);
+                    const temporal = getLessonTemporalState(item, now);
+                    const isCurrent = temporal.state === 'current';
+                    const isPast = temporal.state === 'past';
                     const isSelected = popover?.item.id === item.id;
+
+                    const leftBarColor = item.canceled
+                      ? '#f43f5e'
+                      : isPast
+                      ? '#52525b'
+                      : rawColor;
+
+                    const cardStyle: React.CSSProperties = {
+                      top: `${top}px`,
+                      height: `${height}px`,
+                      left: `calc(${leftPct}% + 3px)`,
+                      width: `calc(${widthPct}% - 6px)`,
+                      borderLeftColor: leftBarColor,
+                      ...(isCurrent
+                        ? {
+                            backgroundColor: hexToRgba(rawColor, 0.17),
+                            borderColor: hexToRgba(rawColor, 0.65),
+                            borderLeftColor: rawColor,
+                            boxShadow: `0 0 22px -6px ${hexToRgba(rawColor, 0.65)}`,
+                          }
+                        : {}),
+                    };
 
                     return (
                       <button
                         key={item.id}
                         data-timetable-card="true"
                         onClick={(e) => handleCardClick(e, item)}
-                        style={{
-                          top: `${top}px`,
-                          height: `${height}px`,
-                          left: `calc(${leftPct}% + 3px)`,
-                          width: `calc(${widthPct}% - 6px)`,
-                          borderLeftColor: accentColor,
-                        }}
-                        className={`absolute rounded-xl border border-l-[3px] px-2.5 py-1.5 text-left overflow-hidden transition-all group ${
+                        style={cardStyle}
+                        className={`absolute rounded-xl border border-l-[4px] px-2.5 py-1.5 text-left overflow-hidden transition-all group flex flex-col justify-between ${
                           isSelected
-                            ? 'z-30 ring-2 ring-accent/70 border-accent/50 bg-[#1D1D2B]'
-                            : 'z-10 border-white/[0.07] hover:z-30 hover:border-white/[0.18]'
+                            ? 'z-30 ring-2 ring-accent/80 border-accent/60 bg-[#1F1F2E]'
+                            : isCurrent
+                            ? 'z-20 ring-1 ring-white/20'
+                            : 'z-10 hover:z-30'
                         } ${
                           item.canceled
-                            ? 'bg-rose-950/30 opacity-75'
-                            : isSelected
+                            ? 'bg-rose-950/30 border-rose-500/25 opacity-75'
+                            : isPast
+                            ? 'bg-[#101015]/80 border-white/[0.04] opacity-55 hover:opacity-85'
+                            : isCurrent || isSelected
                             ? ''
-                            : 'bg-[#15151E]/95 hover:bg-[#1B1B26]'
+                            : 'bg-[#161622]/95 border-white/[0.08] hover:border-white/[0.2] hover:bg-[#1C1C2B]'
                         }`}
                       >
-                        <div className="flex items-start justify-between gap-1">
-                          <span
-                            className={`text-[12px] font-semibold leading-tight line-clamp-2 ${
-                              item.canceled ? 'line-through text-zinc-400' : 'text-white'
+                        <div className="min-w-0">
+                          {/* Crisp Time + Live Status Strip */}
+                          <div className="flex items-center justify-between gap-1 text-[10px] tabular-nums mb-0.5">
+                            <span
+                              className={`font-semibold ${
+                                isCurrent
+                                  ? 'text-white'
+                                  : isPast
+                                  ? 'text-zinc-500'
+                                  : 'text-zinc-400'
+                              }`}
+                            >
+                              {formatTime(item.startDate)} – {formatTime(item.endDate)}
+                            </span>
+                            <div className="flex items-center gap-1 shrink-0">
+                              {isCurrent && (
+                                <span className="px-1.5 py-0.2 rounded-full bg-emerald-400/20 text-emerald-300 border border-emerald-400/40 text-[9px] font-bold flex items-center gap-1">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                  EN COURS
+                                </span>
+                              )}
+                              {item.lessonResourceID && !item.canceled && !isCurrent && (
+                                <span
+                                  title="Contenu de cours disponible"
+                                  className={`w-1.5 h-1.5 rounded-full ${
+                                    isPast ? 'bg-zinc-600' : 'bg-accent/80'
+                                  }`}
+                                />
+                              )}
+                              {item.test && !item.canceled && (
+                                <span
+                                  className={`px-1 py-0.2 rounded text-[9px] font-bold ${
+                                    isPast
+                                      ? 'bg-zinc-800 text-zinc-500'
+                                      : 'bg-amber-500/20 text-amber-300'
+                                  }`}
+                                >
+                                  DS
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Subject Title */}
+                          <div
+                            className={`text-[12px] font-bold leading-tight truncate ${
+                              item.canceled
+                                ? 'line-through text-zinc-400'
+                                : isPast
+                                ? 'text-zinc-400'
+                                : 'text-white'
                             }`}
                           >
                             {item.title}
-                          </span>
-                          <div className="flex items-center gap-1 shrink-0">
-                            {item.lessonResourceID && !item.canceled && (
-                              <span
-                                title="Contenu de cours disponible"
-                                className="w-1.5 h-1.5 rounded-full bg-accent/80 mt-1"
-                              />
-                            )}
-                            {item.test && !item.canceled && (
-                              <span className="px-1 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[9px] font-bold">
-                                DS
-                              </span>
-                            )}
                           </div>
+
+                          {/* Room / Status / Teacher */}
+                          {height >= 54 && (
+                            <div className="mt-0.5 space-y-0.5 text-[10.5px]">
+                              {item.canceled || item.status ? (
+                                <div
+                                  className={`font-semibold truncate ${
+                                    item.canceled
+                                      ? 'text-rose-300'
+                                      : isPast
+                                      ? 'text-zinc-500'
+                                      : 'text-amber-300'
+                                  }`}
+                                >
+                                  {item.status || 'Cours annulé'}
+                                </div>
+                              ) : null}
+                              {item.classrooms.length > 0 && (
+                                <div
+                                  className={`truncate font-medium ${
+                                    isCurrent
+                                      ? 'text-zinc-100'
+                                      : isPast
+                                      ? 'text-zinc-500'
+                                      : 'text-zinc-300'
+                                  }`}
+                                >
+                                  Salle {item.classrooms.join(', ')}
+                                  {height < 76 && item.teachers[0] ? ` · ${item.teachers[0]}` : ''}
+                                </div>
+                              )}
+                              {height >= 76 && item.teachers.length > 0 && (
+                                <div
+                                  className={`truncate ${
+                                    isPast ? 'text-zinc-600' : 'text-zinc-400'
+                                  }`}
+                                >
+                                  {item.teachers[0]}
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
 
-                        {height >= 48 && (
-                          <div className="mt-1 space-y-0.5 text-[10.5px] text-zinc-400">
-                            {item.canceled || item.status ? (
-                              <div
-                                className={`font-medium truncate ${
-                                  item.canceled ? 'text-rose-300' : 'text-amber-300'
-                                }`}
-                              >
-                                {item.status || 'Cours annulé'}
-                              </div>
-                            ) : null}
-                            {item.classrooms.length > 0 && (
-                              <div className="truncate text-zinc-300">
-                                {item.classrooms.join(', ')}
-                              </div>
-                            )}
-                            {height >= 68 && item.teachers.length > 0 && (
-                              <div className="truncate text-zinc-500">{item.teachers[0]}</div>
-                            )}
+                        {/* Live Progress Bar for Current Course */}
+                        {isCurrent && (
+                          <div className="w-full h-1 rounded-full bg-black/40 overflow-hidden mt-1">
+                            <div
+                              className="h-full rounded-full transition-all"
+                              style={{
+                                width: `${temporal.progressPct}%`,
+                                backgroundColor: rawColor,
+                              }}
+                            />
                           </div>
                         )}
                       </button>
@@ -618,7 +850,6 @@ export const TimetableView: React.FC<TimetableViewProps> = ({
           }}
           className="z-50 rounded-2xl bg-[#101018]/98 border border-white/[0.13] shadow-[0_20px_60px_-10px_rgba(0,0,0,0.9)] backdrop-blur-xl flex flex-col overflow-hidden animate-slide-up"
         >
-          {/* Color Top Strip */}
           <div
             className="h-1.5 w-full shrink-0"
             style={{
@@ -628,7 +859,6 @@ export const TimetableView: React.FC<TimetableViewProps> = ({
             }}
           />
 
-          {/* Popover Header */}
           <div className="px-4 pt-3.5 pb-3 border-b border-white/[0.06] flex items-start justify-between gap-2 shrink-0">
             <div className="min-w-0">
               <h2 className="text-[15.5px] font-bold text-white leading-snug">
@@ -661,9 +891,7 @@ export const TimetableView: React.FC<TimetableViewProps> = ({
             </button>
           </div>
 
-          {/* Scrollable Body */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {/* Status Badges */}
             {(popover.item.canceled ||
               popover.item.status ||
               popover.item.test ||
@@ -693,7 +921,6 @@ export const TimetableView: React.FC<TimetableViewProps> = ({
               </div>
             )}
 
-            {/* Metadata Grid */}
             <div className="space-y-2 text-[12.5px]">
               {popover.item.teachers.length > 0 && (
                 <div className="flex items-center gap-2.5 text-zinc-200">
@@ -734,7 +961,6 @@ export const TimetableView: React.FC<TimetableViewProps> = ({
               )}
             </div>
 
-            {/* Lesson Content (Cahier de textes — contenu de séance) */}
             {popover.item.lessonResourceID && (
               <div className="pt-3 border-t border-white/[0.06] space-y-2.5">
                 <div className="flex items-center justify-between">
@@ -812,7 +1038,6 @@ export const TimetableView: React.FC<TimetableViewProps> = ({
               </div>
             )}
 
-            {/* Related Homework for this lesson / day */}
             {relatedHomework.length > 0 && (
               <div className="pt-3 border-t border-white/[0.06] space-y-2">
                 <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-emerald-400">

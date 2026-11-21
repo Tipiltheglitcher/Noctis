@@ -319,6 +319,24 @@ export interface AuthResult {
   profile?: StudentProfile;
   challenge?: SecurityChallengeDTO;
   error?: string;
+  offline?: boolean;
+  lastSyncedAt?: string;
+  invalidCredentials?: boolean;
+}
+
+export interface OfflineCacheSnapshot {
+  profile: StudentProfile;
+  lastSyncedAt: string;
+  timetables: Record<string, TimetableResponse>;
+  latestTimetable?: TimetableResponse | null;
+  homework: HomeworkDTO[];
+  grades: Record<string, GradesOverviewDTO>;
+  latestGrades?: GradesOverviewDTO | null;
+  attendance: Record<string, AttendanceDTO>;
+  latestAttendance?: AttendanceDTO | null;
+  news: NewsItemDTO[];
+  discussions: DiscussionSummaryDTO[];
+  menus: MenuDayDTO[];
 }
 
 export interface UpdateInfoDTO {
@@ -351,6 +369,7 @@ export interface PronoteAPI {
   };
   auth: {
     restoreSession: () => Promise<AuthResult>;
+    reconnect: () => Promise<AuthResult>;
     loginQR: (payload: { qr: { jeton: string; login: string; url: string }; pin: string }) => Promise<AuthResult>;
     loginENT: (options: {
       mode: 'lyceeconnecte' | 'lyceeconnecte-educonnect' | 'lyceeconnecte-direct' | 'url';
@@ -367,6 +386,8 @@ export interface PronoteAPI {
   };
   data: {
     getProfile: () => Promise<StudentProfile | null>;
+    getOfflineSnapshot: () => Promise<OfflineCacheSnapshot | null>;
+    getMessagingDisabled: () => Promise<boolean>;
     getTimetable: (dateISO: string) => Promise<TimetableResponse>;
     getLessonDetails: (resourceId: string) => Promise<LessonDetailsDTO | null>;
     getHomework: (fromISO: string, toISO: string) => Promise<HomeworkDTO[]>;

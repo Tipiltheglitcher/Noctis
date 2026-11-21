@@ -524,6 +524,7 @@ class WebPronoteBridge {
       auth: {
         // Ephemeral web session by design: always reconnect when reopening tab
         restoreSession: async () => ({ ok: false }),
+        reconnect: async () => ({ ok: false }),
         loginQR: async ({ qr, pin }) => {
           const deviceUUID = makeUUID();
           const session = createSessionHandle(createRelayFetcher());
@@ -621,6 +622,8 @@ class WebPronoteBridge {
       },
       data: {
         getProfile: async () => this.profileCache,
+        getOfflineSnapshot: async () => null,
+        getMessagingDisabled: async () => false,
         getTimetable: async (dateISO) => {
           if (this.localDemoMode) {
             const end = new Date(this.localDemo.monday);

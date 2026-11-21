@@ -15,6 +15,7 @@ const api: PronoteAPI = {
   },
   auth: {
     restoreSession: () => ipcRenderer.invoke('auth:restore'),
+    reconnect: () => ipcRenderer.invoke('auth:reconnect'),
     loginQR: (payload) => ipcRenderer.invoke('auth:loginQR', payload),
     loginENT: (options) => ipcRenderer.invoke('auth:loginENT', options),
     cancelENT: () => ipcRenderer.invoke('auth:cancelENT'),
@@ -31,6 +32,8 @@ const api: PronoteAPI = {
   },
   data: {
     getProfile: () => ipcRenderer.invoke('data:getProfile'),
+    getOfflineSnapshot: () => ipcRenderer.invoke('data:getOfflineSnapshot'),
+    getMessagingDisabled: () => ipcRenderer.invoke('data:getMessagingDisabled'),
     getTimetable: (dateISO) => ipcRenderer.invoke('data:getTimetable', dateISO),
     getLessonDetails: (resourceId) => ipcRenderer.invoke('data:getLessonDetails', resourceId),
     getHomework: (fromISO, toISO) => ipcRenderer.invoke('data:getHomework', fromISO, toISO),

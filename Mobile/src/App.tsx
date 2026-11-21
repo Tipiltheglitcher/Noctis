@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   LayoutDashboard,
   CalendarDays,
@@ -12,6 +12,7 @@ import {
   Settings,
   Loader2,
   X,
+  WifiOff,
 } from 'lucide-react';
 import { StatusBar, Style } from '@capacitor/status-bar';
 import { Capacitor } from '@capacitor/core';
@@ -25,11 +26,19 @@ import type {
   MobileTab,
   MobileUpdateInfo,
   NewsItemDTO,
+  OfflineCacheSnapshot,
   StudentProfile,
   TimetableResponse,
 } from './types';
 import { mobilePronote } from './services/pronote';
 import { checkMobileUpdate } from './services/updater';
+import {
+  evaluateDayAutoAdvance,
+  formatLastSync,
+  getInitialSchoolDate,
+  getWeekKey,
+  isWeekend,
+} from './utils/schoolTime';
 import { MobileLogin } from './components/MobileLogin';
 import { MobileUpdateSheet } from './components/MobileUpdateSheet';
 import {
@@ -51,7 +60,16 @@ export default function App() {
   const [settings, setSettings] = useState<MobileSettings>({ accent: 'violet' });
   const [refreshing, setRefreshing] = useState(false);
 
-  const [timetableDate, setTimetableDate] = useState(() => new Date());
+  // Offline / sync state
+  const [isOffline, setIsOffline] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [reconnecting, setReconnecting] = useState(false);
+  const [messagingDisabled, setMessagingDisabled] = useState(false);
+
+  const [timetableDate, setTimetableDate] = useState(() => getInitialSchoolDate());
+  const [autoAdvanceNote, setAutoAdvanceNote] = useState<string | null>(() =>
+    isWeekend(new Date()) ? 'Week-end · Affichage de lundi' : null
+  );
   const [timetable, setTimetable] = useState<TimetableResponse | null>(null);
   const [loadingTt, setLoadingTt] = useState(false);
 
@@ -62,16 +80,33 @@ export default function App() {
   const [attendance, setAttendance] = useState<AttendanceDTO | null>(null);
   const [news, setNews] = useState<NewsItemDTO[]>([]);
   const [discussions, setDiscussions] = useState<DiscussionSummaryDTO[]>([]);
-  const [menusDate, setMenusDate] = useState(() => new Date());
+  const [menusDate, setMenusDate] = useState(() => getInitialSchoolDate());
   const [menus, setMenus] = useState<MenuDayDTO[]>([]);
 
   const [updateInfo, setUpdateInfo] = useState<MobileUpdateInfo | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updateMsg, setUpdateMsg] = useState<string | null>(null);
 
+  const hasAutoAdvancedRef = useRef(false);
+  const cachedSnapRef = useRef<OfflineCacheSnapshot | null>(null);
+
   useEffect(() => {
     document.documentElement.setAttribute('data-accent', settings.accent);
   }, [settings.accent]);
+
+  const hydrateFromSnapshot = useCallback((snap: OfflineCacheSnapshot, targetDate: Date) => {
+    cachedSnapRef.current = snap;
+    setLastSyncedAt(snap.lastSyncedAt || null);
+    const wkKey = getWeekKey(targetDate);
+    const cachedTt = snap.timetables?.[wkKey] ?? snap.latestTimetable ?? null;
+    if (cachedTt) setTimetable(cachedTt);
+    if (snap.homework?.length) setHomework(snap.homework);
+    if (snap.latestGrades) setGrades(snap.latestGrades);
+    if (snap.latestAttendance) setAttendance(snap.latestAttendance);
+    if (snap.news?.length) setNews(snap.news);
+    if (snap.discussions?.length) setDiscussions(snap.discussions);
+    if (snap.menus?.length) setMenus(snap.menus);
+  }, []);
 
   useEffect(() => {
     if (Capacitor.isNativePlatform()) {
@@ -86,7 +121,7 @@ export default function App() {
         // default
       }
 
-      // Check GitHub Releases automatically on every startup
+      // Check GitHub Releases automatically on every startup (ignore offline errors)
       checkMobileUpdate()
         .then((info) => {
           if (info.updateAvailable) setUpdateInfo(info);
@@ -96,7 +131,8 @@ export default function App() {
       try {
         const res = await mobilePronote.restoreSession();
         if (res.ok && res.profile) {
-          setProfile(res.profile);
+          const initDate = getInitialSchoolDate();
+          setTimetableDate(initDate);
           setGradePeriodId(
             res.profile.gradePeriods.find((p) => p.isDefault)?.id ||
               res.profile.gradePeriods[0]?.id ||
@@ -107,41 +143,164 @@ export default function App() {
               res.profile.attendancePeriods[0]?.id ||
               ''
           );
+
+          // Pre-hydrate cached data immediately so user sees content right away (online OR offline!)
+          const snap = await mobilePronote.loadOfflineSnapshot();
+          if (snap) {
+            hydrateFromSnapshot(snap, initDate);
+          }
+
+          if (res.offline) {
+            setIsOffline(true);
+            if (res.lastSyncedAt) setLastSyncedAt(res.lastSyncedAt);
+          } else {
+            setIsOffline(false);
+          }
+
+          setProfile(res.profile);
         }
       } finally {
         setBooting(false);
       }
     })();
-  }, []);
+  }, [hydrateFromSnapshot]);
 
-  const refreshAll = useCallback(async () => {
-    if (!profile) return;
-    setRefreshing(true);
-    await Promise.allSettled([
-      mobilePronote.getTimetable(timetableDate).then(setTimetable),
-      mobilePronote.getHomework().then(setHomework),
-      mobilePronote.getGrades(gradePeriodId || undefined).then(setGrades),
-      mobilePronote.getAttendance(attPeriodId || undefined).then(setAttendance),
-      mobilePronote.getNews().then(setNews),
-      mobilePronote.getDiscussions().then(setDiscussions),
-      mobilePronote.getMenus(menusDate).then(setMenus),
-    ]);
-    setRefreshing(false);
-  }, [profile, timetableDate, gradePeriodId, attPeriodId, menusDate]);
+  const refreshAll = useCallback(
+    async (allowAutoAdvance = false) => {
+      if (!profile) return;
+      setRefreshing(true);
 
+      // If offline or session not active yet, try reconnecting first without ever logging out!
+      if (isOffline || !mobilePronote.isOnlineSessionActive()) {
+        setReconnecting(true);
+        try {
+          const recon = await mobilePronote.reconnectOnline();
+          if (!recon.ok) {
+            setIsOffline(true);
+            setRefreshing(false);
+            setReconnecting(false);
+            return;
+          }
+          if (recon.profile) setProfile(recon.profile);
+          setIsOffline(false);
+        } catch {
+          setIsOffline(true);
+          setRefreshing(false);
+          setReconnecting(false);
+          return;
+        } finally {
+          setReconnecting(false);
+        }
+      }
+
+      const settled = await Promise.allSettled([
+        mobilePronote.getTimetable(timetableDate).then(async (tt) => {
+          setTimetable(tt);
+          if (allowAutoAdvance && !hasAutoAdvancedRef.current) {
+            hasAutoAdvancedRef.current = true;
+            const adv = evaluateDayAutoAdvance(tt.items, new Date());
+            if (adv.shouldAdvance) {
+              setTimetableDate(adv.targetDate);
+              setAutoAdvanceNote(adv.label);
+              if (getWeekKey(adv.targetDate) !== getWeekKey(timetableDate)) {
+                const nextWeekTt = await mobilePronote.getTimetable(adv.targetDate);
+                setTimetable(nextWeekTt);
+              }
+            }
+          }
+          return true;
+        }),
+        mobilePronote.getHomework().then((list) => {
+          setHomework(list);
+          return true;
+        }),
+        mobilePronote.getGrades(gradePeriodId || undefined).then((g) => {
+          setGrades(g);
+          return true;
+        }),
+        mobilePronote.getAttendance(attPeriodId || undefined).then((a) => {
+          setAttendance(a);
+          return true;
+        }),
+        mobilePronote.getNews().then((n) => {
+          setNews(n);
+          setMessagingDisabled(mobilePronote.getRightToDisconnectFromServer());
+          return true;
+        }),
+        mobilePronote.getDiscussions().then((d) => {
+          setDiscussions(d);
+          setMessagingDisabled(mobilePronote.getRightToDisconnectFromServer());
+          return true;
+        }),
+        mobilePronote.getMenus(menusDate).then((m) => {
+          setMenus(m);
+          return true;
+        }),
+      ]);
+
+      const anySuccess = settled.some((s) => s.status === 'fulfilled');
+      if (anySuccess) {
+        setIsOffline(false);
+        setLastSyncedAt(new Date().toISOString());
+      } else {
+        setIsOffline(true);
+      }
+      setRefreshing(false);
+    },
+    [profile, isOffline, timetableDate, gradePeriodId, attPeriodId, menusDate]
+  );
+
+  // Initial online fetch after boot / login
   useEffect(() => {
-    if (profile) refreshAll();
+    if (profile && !isOffline) {
+      refreshAll(true);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);
 
+  // Auto-reconnect when device comes back online OR app resumes from background!
+  useEffect(() => {
+    if (!profile) return;
+
+    const onOnline = () => {
+      refreshAll(!hasAutoAdvancedRef.current);
+    };
+    const onOffline = () => {
+      setIsOffline(true);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        if (navigator.onLine === false) {
+          setIsOffline(true);
+        } else if (isOffline || !mobilePronote.isOnlineSessionActive()) {
+          refreshAll(!hasAutoAdvancedRef.current);
+        }
+      }
+    };
+
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [profile, isOffline, refreshAll]);
+
   const handleAuthenticated = (p: StudentProfile) => {
-    setProfile(p);
+    hasAutoAdvancedRef.current = false;
+    setIsOffline(false);
+    setTimetableDate(getInitialSchoolDate());
+    setAutoAdvanceNote(isWeekend(new Date()) ? 'Week-end · Affichage de lundi' : null);
     setTab('dashboard');
     setGradePeriodId(p.gradePeriods.find((x) => x.isDefault)?.id || p.gradePeriods[0]?.id || '');
     setAttPeriodId(p.attendancePeriods.find((x) => x.isDefault)?.id || p.attendancePeriods[0]?.id || '');
+    setProfile(p);
   };
 
   const handleToggleHw = async (id: string, done: boolean) => {
+    if (isOffline) return;
     setHomework((prev) => prev.map((h) => (h.id === id ? { ...h, done } : h)));
     try {
       await mobilePronote.setHomeworkDone(id, done);
@@ -149,6 +308,34 @@ export default function App() {
       setHomework((prev) => prev.map((h) => (h.id === id ? { ...h, done: !done } : h)));
     }
   };
+
+  const handleChangeTimetableDate = async (d: Date) => {
+    hasAutoAdvancedRef.current = true;
+    setAutoAdvanceNote(null);
+    setTimetableDate(d);
+    if (isOffline) {
+      const snap = cachedSnapRef.current ?? (await mobilePronote.loadOfflineSnapshot());
+      const cached = snap?.timetables?.[getWeekKey(d)];
+      if (cached) setTimetable(cached);
+      return;
+    }
+    setLoadingTt(true);
+    try {
+      const tt = await mobilePronote.getTimetable(d);
+      setTimetable(tt);
+    } catch {
+      setIsOffline(true);
+      const snap = cachedSnapRef.current ?? (await mobilePronote.loadOfflineSnapshot());
+      const cached = snap?.timetables?.[getWeekKey(d)];
+      if (cached) setTimetable(cached);
+    } finally {
+      setLoadingTt(false);
+    }
+  };
+
+  const handleNewsDetailLoaded = useCallback((updated: NewsItemDTO) => {
+    setNews((prev) => prev.map((n) => (n.id === updated.id ? updated : n)));
+  }, []);
 
   const handleManualUpdate = async () => {
     setCheckingUpdate(true);
@@ -191,7 +378,14 @@ export default function App() {
                 N
               </div>
               <div className="min-w-0">
-                <div className="text-xs font-bold text-white leading-none">Noctis</div>
+                <div className="text-xs font-bold text-white leading-none flex items-center gap-1.5">
+                  <span>Noctis</span>
+                  {isOffline && (
+                    <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[9px] font-bold uppercase tracking-wider">
+                      Hors ligne
+                    </span>
+                  )}
+                </div>
                 <div className="text-[10.5px] text-zinc-500 truncate mt-0.5">
                   {profile.establishmentName}
                 </div>
@@ -199,13 +393,35 @@ export default function App() {
             </div>
 
             <button
-              onClick={refreshAll}
-              disabled={refreshing}
+              onClick={() => refreshAll(false)}
+              disabled={refreshing || reconnecting}
               className="p-2 rounded-xl bg-white/[0.05] text-zinc-300"
             >
-              <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin text-accent' : ''}`} />
+              <RefreshCw
+                className={`w-4 h-4 ${refreshing || reconnecting ? 'animate-spin text-accent' : ''}`}
+              />
             </button>
           </header>
+
+          {/* Offline Mode Warning Banner */}
+          {isOffline && (
+            <div className="shrink-0 px-3.5 py-2 bg-amber-500/12 border-b border-amber-400/25 flex items-center justify-between gap-2 text-[11.5px] text-amber-200">
+              <div className="flex items-start gap-2 min-w-0">
+                <WifiOff className="w-3.5 h-3.5 text-amber-300 shrink-0 mt-0.5" />
+                <div className="min-w-0 leading-snug">
+                  <span className="font-semibold">Non connecté</span> — Données non à jour
+                  {lastSyncedAt ? ` (synchro : ${formatLastSync(lastSyncedAt)})` : ''}.
+                </div>
+              </div>
+              <button
+                onClick={() => refreshAll(false)}
+                disabled={reconnecting || refreshing}
+                className="px-2.5 py-1 rounded-lg bg-amber-400/20 border border-amber-400/35 text-amber-100 text-[11px] font-semibold shrink-0 disabled:opacity-50"
+              >
+                {reconnecting ? '…' : 'Réessayer'}
+              </button>
+            </div>
+          )}
 
           {/* Main Scrollable View */}
           <main className="flex-1 overflow-y-auto obsidian-glow bg-[#07070A]">
@@ -216,6 +432,7 @@ export default function App() {
                 homework={homework}
                 grades={grades}
                 news={news}
+                messagingDisabled={messagingDisabled}
                 onNavigate={setTab}
                 onToggleHomework={handleToggleHw}
               />
@@ -226,14 +443,8 @@ export default function App() {
                 homework={homework}
                 selectedDate={timetableDate}
                 loading={loadingTt}
-                onChangeDate={(d) => {
-                  setTimetableDate(d);
-                  setLoadingTt(true);
-                  mobilePronote
-                    .getTimetable(d)
-                    .then(setTimetable)
-                    .finally(() => setLoadingTt(false));
-                }}
+                autoAdvanceNote={autoAdvanceNote}
+                onChangeDate={handleChangeTimetableDate}
                 onToggleHomework={handleToggleHw}
               />
             )}
@@ -245,9 +456,17 @@ export default function App() {
                 grades={grades}
                 periods={profile.gradePeriods}
                 selectedPeriodId={gradePeriodId}
-                onSelectPeriod={(id) => {
+                onSelectPeriod={async (id) => {
                   setGradePeriodId(id);
-                  mobilePronote.getGrades(id).then(setGrades);
+                  if (isOffline) {
+                    const snap = cachedSnapRef.current ?? (await mobilePronote.loadOfflineSnapshot());
+                    if (snap?.grades?.[id]) setGrades(snap.grades[id]);
+                    return;
+                  }
+                  mobilePronote
+                    .getGrades(id)
+                    .then(setGrades)
+                    .catch(() => setIsOffline(true));
                 }}
               />
             )}
@@ -256,9 +475,17 @@ export default function App() {
                 attendance={attendance}
                 periods={profile.attendancePeriods}
                 selectedPeriodId={attPeriodId}
-                onSelectPeriod={(id) => {
+                onSelectPeriod={async (id) => {
                   setAttPeriodId(id);
-                  mobilePronote.getAttendance(id).then(setAttendance);
+                  if (isOffline) {
+                    const snap = cachedSnapRef.current ?? (await mobilePronote.loadOfflineSnapshot());
+                    if (snap?.attendance?.[id]) setAttendance(snap.attendance[id]);
+                    return;
+                  }
+                  mobilePronote
+                    .getAttendance(id)
+                    .then(setAttendance)
+                    .catch(() => setIsOffline(true));
                 }}
               />
             )}
@@ -266,13 +493,20 @@ export default function App() {
               <MobileMessages
                 news={news}
                 discussions={discussions}
+                messagingDisabled={messagingDisabled}
+                onNewsDetailLoaded={handleNewsDetailLoaded}
                 onRefresh={async () => {
-                  const [n, d] = await Promise.all([
-                    mobilePronote.getNews(),
-                    mobilePronote.getDiscussions(),
-                  ]);
-                  setNews(n);
-                  setDiscussions(d);
+                  try {
+                    const [n, d] = await Promise.all([
+                      mobilePronote.getNews(),
+                      mobilePronote.getDiscussions(),
+                    ]);
+                    setNews(n);
+                    setDiscussions(d);
+                    setMessagingDisabled(mobilePronote.getRightToDisconnectFromServer());
+                  } catch {
+                    setIsOffline(true);
+                  }
                 }}
               />
             )}
@@ -282,7 +516,12 @@ export default function App() {
                 selectedDate={menusDate}
                 onChangeDate={(d) => {
                   setMenusDate(d);
-                  mobilePronote.getMenus(d).then(setMenus);
+                  if (!isOffline) {
+                    mobilePronote
+                      .getMenus(d)
+                      .then(setMenus)
+                      .catch(() => setIsOffline(true));
+                  }
                 }}
               />
             )}
@@ -299,6 +538,12 @@ export default function App() {
                 onCheckUpdate={handleManualUpdate}
                 onLogout={async () => {
                   await mobilePronote.logout();
+                  cachedSnapRef.current = null;
+                  hasAutoAdvancedRef.current = false;
+                  setIsOffline(false);
+                  setLastSyncedAt(null);
+                  setMessagingDisabled(false);
+                  setAutoAdvanceNote(null);
                   setProfile(null);
                 }}
               />

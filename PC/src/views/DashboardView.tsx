@@ -12,6 +12,7 @@ import {
   Clock,
   Sparkles,
   AlertTriangle,
+  UtensilsCrossed,
 } from 'lucide-react';
 import type {
   GradesOverviewDTO,
@@ -24,6 +25,7 @@ import type {
 import {
   formatDateFull,
   formatDateRelative,
+  formatDurationMinutes,
   formatGradeNumber,
   formatTime,
   getGradeColorClass,
@@ -32,6 +34,13 @@ import {
   normalizeHexColor,
   stripHtmlToPreview,
 } from '@/utils/format';
+import {
+  computeDayBreaks,
+  evaluateDayAutoAdvance,
+  getLessonTemporalState,
+  isWeekend,
+} from '@/utils/schoolTime';
+import { RightToDisconnectNote } from '../components/RightToDisconnectNote';
 
 interface DashboardViewProps {
   profile: StudentProfile;
@@ -40,6 +49,7 @@ interface DashboardViewProps {
   grades: GradesOverviewDTO | null;
   news: NewsItemDTO[];
   loading: boolean;
+  messagingDisabled?: boolean;
   onNavigate: (tab: NavTab) => void;
   onToggleHomework: (id: string, done: boolean) => void;
 }
@@ -51,6 +61,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   grades,
   news,
   loading,
+  messagingDisabled = false,
   onNavigate,
   onToggleHomework,
 }) => {
@@ -66,17 +77,72 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return today.sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
   }, [timetableItems, now]);
 
-  // If today has no classes (e.g. evening/weekend), also find the next active day in the week
+  // Smart active day: if today's classes are finished (e.g. 15h30 >= 15h30) or it's the weekend,
+  // automatically show the next school day (jumping Friday -> Monday, skipping Sat/Sun)!
   const nextActiveDay = useMemo(() => {
-    if (todayLessons.length > 0) return { label: "Aujourd'hui", items: todayLessons };
-    const upcoming = timetableItems.filter(
-      (item) => new Date(item.endDate).getTime() > now.getTime()
-    );
-    if (upcoming.length === 0) return { label: "Aujourd'hui", items: [] };
-    const firstDate = new Date(upcoming[0].startDate);
-    const sameDayItems = upcoming.filter((i) => isSameDay(new Date(i.startDate), firstDate));
-    return { label: formatDateRelative(firstDate.toISOString()), items: sameDayItems };
+    const adv = evaluateDayAutoAdvance(timetableItems, now);
+    if (!adv.shouldAdvance && todayLessons.length > 0) {
+      return { label: "Aujourd'hui", subtitle: 'Vos cours de la journée', items: todayLessons };
+    }
+
+    const targetItems = timetableItems
+      .filter((i) => isSameDay(new Date(i.startDate), adv.targetDate))
+      .sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
+
+    if (targetItems.length > 0) {
+      const lbl = formatDateRelative(adv.targetDate.toISOString());
+      return {
+        label: lbl.charAt(0).toUpperCase() + lbl.slice(1),
+        subtitle: adv.label || 'Prochaine journée de cours',
+        items: targetItems,
+      };
+    }
+
+    // Fallback: first upcoming non-weekend day in loaded timetable
+    const upcoming = timetableItems.filter((item) => {
+      const d = new Date(item.startDate);
+      return !isWeekend(d) && new Date(item.endDate).getTime() > now.getTime();
+    });
+    if (upcoming.length > 0) {
+      const firstDate = new Date(upcoming[0].startDate);
+      const sameDayItems = upcoming
+        .filter((i) => isSameDay(new Date(i.startDate), firstDate))
+        .sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
+      const lbl = formatDateRelative(firstDate.toISOString());
+      return {
+        label: lbl.charAt(0).toUpperCase() + lbl.slice(1),
+        subtitle: adv.label || 'Prochaine journée de cours',
+        items: sameDayItems,
+      };
+    }
+
+    const lbl = formatDateRelative(adv.targetDate.toISOString());
+    return {
+      label: adv.shouldAdvance ? lbl.charAt(0).toUpperCase() + lbl.slice(1) : "Aujourd'hui",
+      subtitle: adv.label || 'Vos cours de la journée',
+      items: [],
+    };
   }, [timetableItems, todayLessons, now]);
+
+  const activeDayTimeline = useMemo(() => {
+    const breaks = computeDayBreaks(nextActiveDay.items);
+    type Row =
+      | { kind: 'lesson'; sortKey: number; item: TimetableItemDTO }
+      | { kind: 'break'; sortKey: number; brk: (typeof breaks)[number] };
+    const rows: Row[] = [
+      ...nextActiveDay.items.map((item) => ({
+        kind: 'lesson' as const,
+        sortKey: new Date(item.startDate).getTime(),
+        item,
+      })),
+      ...breaks.map((brk) => ({
+        kind: 'break' as const,
+        sortKey: brk.startDate.getTime(),
+        brk,
+      })),
+    ];
+    return rows.sort((a, b) => a.sortKey - b.sortKey);
+  }, [nextActiveDay.items]);
 
   const currentOrNextLesson = useMemo(() => {
     const active = timetableItems.filter((c) => !c.canceled);
@@ -187,6 +253,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         )}
       </div>
 
+      {/* Droit à la déconnexion banner (shown automatically during disconnect hours) */}
+      <RightToDisconnectNote serverDisabled={messagingDisabled} onlyWhenActive />
+
       {/* KPI Quick Strip */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
         <button
@@ -276,7 +345,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <h2 className="text-[15px] font-semibold text-white">
                 Emploi du temps · {nextActiveDay.label}
               </h2>
-              <p className="text-[12px] text-zinc-500">Vos cours de la journée</p>
+              <p className="text-[12px] text-zinc-500">{nextActiveDay.subtitle}</p>
             </div>
             <button
               onClick={() => onNavigate('timetable')}
@@ -299,37 +368,90 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <p className="text-xs text-zinc-500 mt-1">Profitez de votre temps libre !</p>
             </div>
           ) : (
-            <div className="space-y-2.5">
-              {nextActiveDay.items.map((item) => {
+            <div className="space-y-2">
+              {activeDayTimeline.map((row) => {
+                if (row.kind === 'break') {
+                  const isLunch = row.brk.kind === 'lunch';
+                  return (
+                    <div
+                      key={row.brk.id}
+                      className={`px-3 py-2 rounded-xl border border-dashed flex items-center justify-between text-xs ${
+                        isLunch
+                          ? 'bg-amber-500/[0.07] border-amber-400/30 text-amber-300'
+                          : 'bg-white/[0.02] border-white/[0.08] text-zinc-400'
+                      }`}
+                    >
+                      <span className="inline-flex items-center gap-2 font-semibold">
+                        <UtensilsCrossed className="w-3.5 h-3.5" />
+                        {isLunch ? 'Pause déjeuner' : 'Pause'}
+                      </span>
+                      <span className="tabular-nums text-[11px] opacity-85">
+                        {formatTime(row.brk.startDate.toISOString())} –{' '}
+                        {formatTime(row.brk.endDate.toISOString())} ·{' '}
+                        {formatDurationMinutes(row.brk.durationMinutes)}
+                      </span>
+                    </div>
+                  );
+                }
+
+                const item = row.item;
                 const color = normalizeHexColor(item.backgroundColor);
+                const temporal = getLessonTemporalState(item, now);
+                const isCurrent = temporal.state === 'current';
+                const isPast = temporal.state === 'past';
+
                 return (
                   <div
                     key={item.id}
                     className={`p-3 rounded-xl border transition-all flex items-center gap-3.5 ${
                       item.canceled
                         ? 'bg-rose-500/[0.05] border-rose-500/20 opacity-75'
-                        : 'bg-[#13131A] border-white/[0.05] hover:border-white/[0.11]'
+                        : isCurrent
+                        ? 'bg-accent/[0.12] border-accent/50 shadow-glow'
+                        : isPast
+                        ? 'bg-[#0F0F14]/70 border-white/[0.04] opacity-55'
+                        : 'bg-[#13131A] border-white/[0.06] hover:border-white/[0.12]'
                     }`}
                   >
                     <div className="w-12 text-right shrink-0 tabular-nums">
-                      <div className="text-[12.5px] font-semibold text-zinc-100">
+                      <div
+                        className={`text-[12.5px] font-bold ${
+                          isPast ? 'text-zinc-500' : 'text-zinc-100'
+                        }`}
+                      >
                         {formatTime(item.startDate)}
                       </div>
                       <div className="text-[11px] text-zinc-500">{formatTime(item.endDate)}</div>
                     </div>
                     <div
                       className="w-1 self-stretch rounded-full shrink-0"
-                      style={{ backgroundColor: item.canceled ? '#f43f5e' : color }}
+                      style={{
+                        backgroundColor: item.canceled
+                          ? '#f43f5e'
+                          : isPast
+                          ? '#52525b'
+                          : color,
+                      }}
                     />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <span
                           className={`text-[13.5px] font-semibold truncate ${
-                            item.canceled ? 'line-through text-zinc-400' : 'text-white'
+                            item.canceled
+                              ? 'line-through text-zinc-400'
+                              : isPast
+                              ? 'text-zinc-400'
+                              : 'text-white'
                           }`}
                         >
                           {item.title}
                         </span>
+                        {isCurrent && (
+                          <span className="px-1.5 py-0.5 rounded-full text-[9.5px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 shrink-0 inline-flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                            En cours
+                          </span>
+                        )}
                         {item.canceled && (
                           <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-rose-500/20 text-rose-300 shrink-0">
                             {item.status || 'Annulé'}
@@ -355,6 +477,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                           </span>
                         )}
                       </div>
+                      {isCurrent && (
+                        <div className="w-full h-1 rounded-full bg-black/40 mt-2 overflow-hidden">
+                          <div
+                            className="h-full rounded-full"
+                            style={{ width: `${temporal.progressPct}%`, backgroundColor: color }}
+                          />
+                        </div>
+                      )}
                     </div>
                   </div>
                 );

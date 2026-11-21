@@ -1,7 +1,7 @@
 import { app, safeStorage } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { AppSettings } from '../shared/types';
+import type { AppSettings, OfflineCacheSnapshot } from '../shared/types';
 
 export interface SavedAuthData {
   url: string;
@@ -97,4 +97,39 @@ export function saveSettings(partial: Partial<AppSettings>): AppSettings {
   const next: AppSettings = { ...current, ...partial };
   fs.writeFileSync(getSettingsPath(), JSON.stringify(next, null, 2), 'utf8');
   return next;
+}
+
+function getOfflineCachePath(): string {
+  return path.join(app.getPath('userData'), 'noctis-cache.json');
+}
+
+export function loadOfflineCache(): OfflineCacheSnapshot | null {
+  const filePath = getOfflineCachePath();
+  if (!fs.existsSync(filePath)) return null;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8')) as OfflineCacheSnapshot;
+    if (!parsed || !parsed.profile) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function saveOfflineCache(snapshot: OfflineCacheSnapshot): void {
+  try {
+    fs.writeFileSync(getOfflineCachePath(), JSON.stringify(snapshot), 'utf8');
+  } catch (err) {
+    console.warn('[storage] Failed to persist offline cache:', err);
+  }
+}
+
+export function clearOfflineCache(): void {
+  const filePath = getOfflineCachePath();
+  if (fs.existsSync(filePath)) {
+    try {
+      fs.unlinkSync(filePath);
+    } catch {
+      // ignore
+    }
+  }
 }

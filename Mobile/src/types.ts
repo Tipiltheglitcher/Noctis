@@ -290,6 +290,24 @@ export interface AuthResult {
   profile?: StudentProfile;
   challenge?: SecurityChallengeDTO;
   error?: string;
+  offline?: boolean;
+  lastSyncedAt?: string;
+  invalidCredentials?: boolean;
+}
+
+export interface OfflineCacheSnapshot {
+  profile: StudentProfile;
+  lastSyncedAt: string;
+  timetables: Record<string, TimetableResponse>;
+  latestTimetable?: TimetableResponse | null;
+  homework: HomeworkDTO[];
+  grades: Record<string, GradesOverviewDTO>;
+  latestGrades?: GradesOverviewDTO | null;
+  attendance: Record<string, AttendanceDTO>;
+  latestAttendance?: AttendanceDTO | null;
+  news: NewsItemDTO[];
+  discussions: DiscussionSummaryDTO[];
+  menus: MenuDayDTO[];
 }
 
 export interface MobileUpdateInfo {

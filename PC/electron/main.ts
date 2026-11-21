@@ -105,6 +105,10 @@ function registerIpcHandlers(): void {
     return pronoteService.restoreSession();
   });
 
+  ipcMain.handle('auth:reconnect', async () => {
+    return pronoteService.reconnectOnline();
+  });
+
   ipcMain.handle(
     'auth:loginQR',
     async (_e, payload: { qr: { jeton: string; login: string; url: string }; pin: string }) => {
@@ -171,6 +175,8 @@ function registerIpcHandlers(): void {
 
   // Data
   ipcMain.handle('data:getProfile', () => pronoteService.getProfile());
+  ipcMain.handle('data:getOfflineSnapshot', () => pronoteService.getOfflineSnapshot());
+  ipcMain.handle('data:getMessagingDisabled', () => pronoteService.getMessagingDisabled());
   ipcMain.handle('data:getTimetable', (_e, dateISO: string) => pronoteService.getTimetable(dateISO));
   ipcMain.handle('data:getLessonDetails', (_e, resourceId: string) =>
     pronoteService.getLessonDetails(resourceId)

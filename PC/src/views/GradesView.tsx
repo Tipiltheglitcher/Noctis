@@ -18,6 +18,7 @@ import {
   getGradeColorClass,
   normalizeHexColor,
 } from '@/utils/format';
+import { RightToDisconnectNote } from '../components/RightToDisconnectNote';
 
 interface GradesViewProps {
   grades: GradesOverviewDTO | null;
@@ -230,6 +231,8 @@ export const GradesView: React.FC<GradesViewProps> = ({
       </div>
 
       {/* Hero Stats + Evolution Chart */}
+      <RightToDisconnectNote />
+
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         <div className="lg:col-span-5 rounded-2xl bg-[#0D0D13] border border-white/[0.07] p-5 flex flex-col justify-between">
           <div className="flex items-start justify-between">

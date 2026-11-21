@@ -68,13 +68,32 @@ import type {
   MenuDayDTO,
   NewsItemDTO,
   NewsQuestionDTO,
+  OfflineCacheSnapshot,
   PeriodDTO,
   SchoolSearchResult,
   StudentProfile,
   TimetableItemDTO,
   TimetableResponse,
 } from '../shared/types';
-import { clearAuthSession, loadAuthSession, saveAuthSession, type SavedAuthData } from './storage';
+import {
+  clearAuthSession,
+  clearOfflineCache,
+  loadAuthSession,
+  loadOfflineCache,
+  saveAuthSession,
+  saveOfflineCache,
+  type SavedAuthData,
+} from './storage';
+
+function weekKeyFromDate(d: Date): string {
+  const m = new Date(d);
+  const day = m.getDay();
+  m.setDate(m.getDate() + (day === 0 ? -6 : 1 - day));
+  m.setHours(0, 0, 0, 0);
+  return `${m.getFullYear()}-${String(m.getMonth() + 1).padStart(2, '0')}-${String(
+    m.getDate()
+  ).padStart(2, '0')}`;
+}
 
 const DEMO_URL = 'https://demo.index-education.net/pronote';
 
@@ -93,6 +112,56 @@ class PronoteService {
   private pendingSecurity: PendingSecurityState | null = null;
   private newsMap = new Map<string, NewsInformation | NewsSurvey>();
   private discussionsMap = new Map<string, Discussion>();
+  private cacheMem: OfflineCacheSnapshot | null = null;
+  private disconnectMessagingDisabled = false;
+
+  public getOfflineSnapshot(): OfflineCacheSnapshot | null {
+    if (!this.cacheMem) {
+      this.cacheMem = loadOfflineCache();
+    }
+    return this.cacheMem;
+  }
+
+  public getMessagingDisabled(): boolean {
+    return this.disconnectMessagingDisabled;
+  }
+
+  private persistCache(mutator: (snap: OfflineCacheSnapshot) => void): void {
+    if (this.isDemo) return;
+    try {
+      const existing = this.getOfflineSnapshot();
+      const baseProfile = this.profileCache ?? existing?.profile;
+      if (!baseProfile) return;
+      const snap: OfflineCacheSnapshot = existing
+        ? { ...existing, profile: baseProfile }
+        : {
+            profile: baseProfile,
+            lastSyncedAt: new Date().toISOString(),
+            timetables: {},
+            latestTimetable: null,
+            homework: [],
+            grades: {},
+            latestGrades: null,
+            attendance: {},
+            latestAttendance: null,
+            news: [],
+            discussions: [],
+            menus: [],
+          };
+      mutator(snap);
+      snap.lastSyncedAt = new Date().toISOString();
+      const ttKeys = Object.keys(snap.timetables);
+      if (ttKeys.length > 4) {
+        for (const k of ttKeys.sort().slice(0, ttKeys.length - 4)) {
+          delete snap.timetables[k];
+        }
+      }
+      this.cacheMem = snap;
+      saveOfflineCache(snap);
+    } catch {
+      // ignore
+    }
+  }
 
   private getDeviceName(): string {
     const raw = `Noctis (${os.hostname()})`;
@@ -251,7 +320,12 @@ class PronoteService {
     }
 
     const profile = await this.buildProfile();
-    return { ok: true, profile };
+    if (!isDemo) {
+      this.persistCache((snap) => {
+        snap.profile = profile;
+      });
+    }
+    return { ok: true, profile, offline: false, lastSyncedAt: new Date().toISOString() };
   }
 
   private async handlePossibleSecurityError(
@@ -303,6 +377,7 @@ class PronoteService {
     if (error instanceof BadCredentialsError) {
       return {
         ok: false,
+        invalidCredentials: true,
         error: 'Identifiants ou code PIN incorrects. Vérifiez vos informations et réessayez.',
       };
     }
@@ -444,19 +519,58 @@ class PronoteService {
     if (!saved) {
       return { ok: false };
     }
+    this.currentAuth = saved;
+    const cached = this.getOfflineSnapshot();
+
     const res = await this.loginWithToken(saved);
-    if (!res.ok && !res.challenge) {
-      // Token revoked or expired permanently
-      clearAuthSession();
+    if (res.ok) {
+      return res;
     }
+
+    // Only clear saved credentials if PRONOTE explicitly rejected them online
+    if (res.invalidCredentials) {
+      clearAuthSession();
+      clearOfflineCache();
+      this.currentAuth = null;
+      this.cacheMem = null;
+      return res;
+    }
+
+    // Network/offline error -> keep session intact and boot into Offline Mode if cached!
+    if (cached?.profile) {
+      this.profileCache = cached.profile;
+      return {
+        ok: true,
+        profile: cached.profile,
+        offline: true,
+        lastSyncedAt: cached.lastSyncedAt,
+      };
+    }
+
     return res;
+  }
+
+  public async reconnectOnline(): Promise<AuthResult> {
+    if (this.session && this.profileCache) {
+      return { ok: true, profile: this.profileCache, offline: false };
+    }
+    if (!this.currentAuth) {
+      this.currentAuth = loadAuthSession();
+    }
+    if (!this.currentAuth) {
+      return { ok: false, error: 'Aucune session enregistrée.' };
+    }
+    return this.loginWithToken(this.currentAuth);
   }
 
   public logout(): void {
     this.resetSession();
     this.currentAuth = null;
     this.isDemo = false;
+    this.cacheMem = null;
+    this.disconnectMessagingDisabled = false;
     clearAuthSession();
+    clearOfflineCache();
   }
 
   public getProfile(): StudentProfile | null {
@@ -669,13 +783,19 @@ class PronoteService {
         })
         .sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
 
-      return {
+      const res: TimetableResponse = {
         weekNumber: weekNum,
         weekFrequency: freq?.label,
         startDate: monday.toISOString(),
         endDate: sunday.toISOString(),
         items,
       };
+      const wkKey = weekKeyFromDate(monday);
+      this.persistCache((snap) => {
+        snap.timetables[wkKey] = res;
+        snap.latestTimetable = res;
+      });
+      return res;
     });
   }
 
@@ -752,9 +872,13 @@ class PronoteService {
       const to = new Date(toISO);
       const list = await assignmentsFromIntervals(session, from, to);
 
-      return list
+      const mapped = list
         .map((a): HomeworkDTO => this.mapAssignment(a))
         .sort((a, b) => new Date(a.deadline).getTime() - new Date(b.deadline).getTime());
+      this.persistCache((snap) => {
+        snap.homework = mapped;
+      });
+      return mapped;
     });
   }
 
@@ -779,7 +903,7 @@ class PronoteService {
 
       const data = await gradesOverview(session, period);
 
-      return {
+      const overview: GradesOverviewDTO = {
         periodId: period.id,
         periodName: period.name,
         overallAverage:
@@ -819,6 +943,11 @@ class PronoteService {
           }))
           .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
       };
+      this.persistCache((snap) => {
+        snap.grades[overview.periodId] = overview;
+        snap.latestGrades = overview;
+      });
+      return overview;
     });
   }
 
@@ -837,7 +966,7 @@ class PronoteService {
       }
 
       const data = await notebook(session, period);
-      return {
+      const att: AttendanceDTO = {
         periodId: period.id,
         periodName: period.name,
         absences: data.absences
@@ -887,6 +1016,11 @@ class PronoteService {
           }))
           .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
       };
+      this.persistCache((snap) => {
+        snap.attendance[att.periodId] = att;
+        snap.latestAttendance = att;
+      });
+      return att;
     });
   }
 
@@ -962,23 +1096,57 @@ class PronoteService {
     return this.withSessionRetry(async (session) => {
       if (!session.user.authorizations.tabs.includes(TabLocation.News)) return [];
       try {
-        const data = await news(session);
+        const data = (await news(session)) as Awaited<ReturnType<typeof news>> & {
+          messagerieDesactivee?: boolean;
+        };
+        if (typeof data.messagerieDesactivee === 'boolean') {
+          this.disconnectMessagingDisabled = data.messagerieDesactivee;
+        }
         this.newsMap.clear();
 
-        return data.items
+        const mapped = data.items
           .map((item): NewsItemDTO => {
             this.newsMap.set(item.id, item);
             return this.mapNewsItem(item);
           })
           .sort((a, b) => new Date(b.creationDate).getTime() - new Date(a.creationDate).getTime());
+
+        if (mapped.length === 0 && data.messagerieDesactivee) {
+          const cached = this.getOfflineSnapshot();
+          if (cached?.news?.length) return cached.news;
+        }
+
+        const cached = this.getOfflineSnapshot();
+        const merged = mapped.map((item) => {
+          if (item.needsDetail && cached?.news) {
+            const prev = cached.news.find((c) => c.id === item.id && !c.needsDetail);
+            if (prev) {
+              return {
+                ...item,
+                content: prev.content,
+                questions: prev.questions,
+                attachments: prev.attachments,
+              };
+            }
+          }
+          return item;
+        });
+
+        this.persistCache((snap) => {
+          snap.news = merged;
+        });
+        return merged;
       } catch (err) {
         console.warn('[pronote] getNews failed gracefully:', err);
-        return [];
+        return this.getOfflineSnapshot()?.news ?? [];
       }
     });
   }
 
   public async getNewsDetail(newsId: string): Promise<NewsItemDTO | null> {
+    if (!this.session) {
+      return this.getOfflineSnapshot()?.news?.find((n) => n.id === newsId) ?? null;
+    }
     return this.withSessionRetry(async () => {
       const item = this.newsMap.get(newsId) as
         | ((NewsInformation | NewsSurvey) & {
@@ -986,14 +1154,20 @@ class PronoteService {
             __fetchDetail?: () => Promise<NewsInformation | NewsSurvey>;
           })
         | undefined;
-      if (!item) return null;
+      if (!item) {
+        return this.getOfflineSnapshot()?.news?.find((n) => n.id === newsId) ?? null;
+      }
       if (!item.__needsDetail || typeof item.__fetchDetail !== 'function') {
         return this.mapNewsItem(item);
       }
       try {
         const full = await item.__fetchDetail();
         this.newsMap.set(newsId, full);
-        return this.mapNewsItem(full);
+        const dto = this.mapNewsItem(full);
+        this.persistCache((snap) => {
+          snap.news = snap.news.map((n) => (n.id === dto.id ? dto : n));
+        });
+        return dto;
       } catch (err) {
         console.warn('[pronote] getNewsDetail failed:', err);
         return this.mapNewsItem(item);
@@ -1048,10 +1222,15 @@ class PronoteService {
     return this.withSessionRetry(async (session) => {
       if (!session.user.authorizations.canReadDiscussions) return [];
       try {
-        const data = await discussions(session);
+        const data = (await discussions(session)) as Awaited<ReturnType<typeof discussions>> & {
+          messagerieDesactivee?: boolean;
+        };
+        if (typeof data.messagerieDesactivee === 'boolean' && data.messagerieDesactivee) {
+          this.disconnectMessagingDisabled = true;
+        }
         this.discussionsMap.clear();
 
-        return data.items
+        const mapped = data.items
           .map((d): DiscussionSummaryDTO => {
             const id = d.participantsMessageID;
             this.discussionsMap.set(id, d);
@@ -1067,9 +1246,19 @@ class PronoteService {
             };
           })
           .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+        if (mapped.length === 0 && data.messagerieDesactivee) {
+          const cached = this.getOfflineSnapshot();
+          if (cached?.discussions?.length) return cached.discussions;
+        }
+
+        this.persistCache((snap) => {
+          snap.discussions = mapped;
+        });
+        return mapped;
       } catch (err) {
         console.warn('[pronote] getDiscussions failed gracefully:', err);
-        return [];
+        return this.getOfflineSnapshot()?.discussions ?? [];
       }
     });
   }
@@ -1136,13 +1325,17 @@ class PronoteService {
       }
       try {
         const weekMenu = await menus(session, dateISO ? new Date(dateISO) : new Date());
-        return weekMenu.days.map((day) => ({
+        const mapped = weekMenu.days.map((day) => ({
           date: day.date.toISOString(),
           lunch: this.mapMeal(day.lunch),
           dinner: this.mapMeal(day.dinner),
         }));
+        this.persistCache((snap) => {
+          snap.menus = mapped;
+        });
+        return mapped;
       } catch {
-        return [];
+        return this.getOfflineSnapshot()?.menus ?? [];
       }
     });
   }

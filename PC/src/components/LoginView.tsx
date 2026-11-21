@@ -334,7 +334,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onAuthenticated }) => {
           </h1>
           <p className="text-[13.5px] text-zinc-400 mt-1.5">
             Votre espace scolaire moderne sur PC — connectez-vous via{' '}
-            <span className="text-zinc-200">Lycée Connecté / ENT</span> ou par{' '}
+            <span className="text-zinc-200">votre établissement / ENT</span> ou par{' '}
             <span className="text-zinc-200">QR Code</span>.
           </p>
         </div>
@@ -356,7 +356,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onAuthenticated }) => {
               }`}
             >
               <Globe className={`w-4 h-4 ${tab === 'ent' ? 'text-accent' : ''}`} />
-              <span>ENT / Lycée Connecté</span>
+              <span>Établissement / ENT</span>
             </button>
 
             <button
@@ -409,74 +409,32 @@ export const LoginView: React.FC<LoginViewProps> = ({ onAuthenticated }) => {
               </div>
             )}
 
-            {/* TAB 1: ENT / LYCÉE CONNECTÉ */}
+            {/* TAB 1: UNIVERSAL SCHOOL / ENT SEARCH */}
             {tab === 'ent' && (
               <div className="space-y-4">
-                {/* 1-Click Lycée Connecté Hero Button (Direct ÉduConnect SSO -> auto-detects Pronote!) */}
-                <div className="space-y-2">
-                  <button
-                    type="button"
-                    disabled={loading}
-                    onClick={() => launchEntLogin({ mode: 'lyceeconnecte-educonnect' })}
-                    className="group w-full p-4 rounded-xl bg-gradient-to-r from-accent/20 via-accent/10 to-transparent hover:from-accent/30 hover:via-accent/15 border border-accent/30 flex items-center justify-between text-left transition-all disabled:opacity-50"
-                  >
-                    <div className="flex items-center gap-3.5">
-                      <div className="w-10 h-10 rounded-xl bg-accent/20 border border-accent/35 flex items-center justify-center text-accent shrink-0">
-                        <Globe className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <div className="text-[14px] font-semibold text-white flex items-center gap-2">
-                          Lycée Connecté · ÉduConnect
-                          <span className="text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-accent/25 text-accent">
-                            Automatique
-                          </span>
-                        </div>
-                        <div className="text-[12px] text-zinc-400 mt-0.5">
-                          Connexion directe élève ÉduConnect — Noctis récupère votre PRONOTE tout seul.
-                        </div>
-                      </div>
-                    </div>
-                    <ArrowRight className="w-4 h-4 text-zinc-400 group-hover:text-white group-hover:translate-x-0.5 transition-all shrink-0 ml-2" />
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={loading}
-                    onClick={() => launchEntLogin({ mode: 'lyceeconnecte-direct' })}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-[#121219] hover:bg-[#171722] border border-white/[0.07] flex items-center justify-between text-left text-[12.5px] text-zinc-300 hover:text-white transition-all disabled:opacity-50"
-                  >
-                    <span>Connexion Lycée Connecté (sans ÉduConnect / identifiant ENT)</span>
-                    <ArrowRight className="w-3.5 h-3.5 text-zinc-500" />
-                  </button>
-                </div>
-
-                {/* Divider */}
-                <div className="flex items-center gap-3">
-                  <div className="h-px flex-1 bg-white/[0.06]" />
-                  <span className="text-[11px] uppercase tracking-wider text-zinc-500 font-medium">
-                    ou rechercher votre établissement
-                  </span>
-                  <div className="h-px flex-1 bg-white/[0.06]" />
-                </div>
-
-                {/* School Search */}
                 <div>
+                  <label className="block text-[12.5px] font-semibold text-zinc-200 mb-1.5">
+                    Rechercher votre lycée ou collège
+                  </label>
                   <div className="relative">
                     <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                     <input
                       type="text"
                       value={schoolQuery}
                       onChange={(e) => setSchoolQuery(e.target.value)}
-                      placeholder="Ville, code postal, nom du lycée ou URL PRONOTE…"
-                      className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-[#13131A] border border-white/[0.08] focus:border-accent/60 focus:outline-none text-[13.5px] text-white placeholder:text-zinc-500 transition-colors"
+                      placeholder="Nom du lycée, ville, code postal ou URL PRONOTE…"
+                      className="w-full pl-10 pr-10 py-3 rounded-xl bg-[#13131A] border border-white/[0.1] focus:border-accent/60 focus:outline-none text-[13.5px] text-white placeholder:text-zinc-500 transition-colors"
                     />
                     {searchingSchools && (
                       <Loader2 className="w-4 h-4 text-accent animate-spin absolute right-3.5 top-1/2 -translate-y-1/2" />
                     )}
                   </div>
+                  <p className="text-[11.5px] text-zinc-500 mt-2 leading-relaxed">
+                    Compatible avec tous les établissements PRONOTE & ENT de France (ÉduConnect, Île-de-France, Atrium, MonBureauNumérique, Toutatice, Lycée Connecté…).
+                  </p>
 
                   {schools.length > 0 && (
-                    <div className="mt-2.5 max-h-52 overflow-y-auto rounded-xl bg-[#0A0A0F] border border-white/[0.07] divide-y divide-white/[0.05]">
+                    <div className="mt-2.5 max-h-56 overflow-y-auto rounded-xl bg-[#0A0A0F] border border-white/[0.07] divide-y divide-white/[0.05]">
                       {schools.map((s) => (
                         <button
                           key={s.url}
@@ -507,9 +465,36 @@ export const LoginView: React.FC<LoginViewProps> = ({ onAuthenticated }) => {
 
                   {!searchingSchools && schoolQuery.trim().length >= 3 && schools.length === 0 && (
                     <p className="text-[12px] text-zinc-500 mt-2 px-1">
-                      Aucun établissement trouvé pour « {schoolQuery} ». Essayez avec votre ville ou code postal, ou utilisez le bouton Lycée Connecté ci-dessus.
+                      Aucun établissement trouvé pour « {schoolQuery} ». Essayez avec votre ville, code postal, collez directement l'URL PRONOTE ou utilisez l'onglet QR Code.
                     </p>
                   )}
+                </div>
+
+                {/* Discreet Quick ENT shortcuts */}
+                <div className="pt-2 border-t border-white/[0.06] space-y-2">
+                  <div className="text-[11px] font-medium text-zinc-500">
+                    Accès rapide ENT (Nouvelle-Aquitaine)
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      disabled={loading}
+                      onClick={() => launchEntLogin({ mode: 'lyceeconnecte-educonnect' })}
+                      className="px-3 py-2 rounded-xl bg-[#121219] hover:bg-[#171722] border border-white/[0.07] flex items-center justify-between text-left text-[12px] text-zinc-300 hover:text-white transition-all disabled:opacity-50"
+                    >
+                      <span className="truncate">Lycée Connecté (ÉduConnect)</span>
+                      <ArrowRight className="w-3.5 h-3.5 text-zinc-500 shrink-0 ml-1" />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={loading}
+                      onClick={() => launchEntLogin({ mode: 'lyceeconnecte-direct' })}
+                      className="px-3 py-2 rounded-xl bg-[#121219] hover:bg-[#171722] border border-white/[0.07] flex items-center justify-between text-left text-[12px] text-zinc-300 hover:text-white transition-all disabled:opacity-50"
+                    >
+                      <span className="truncate">Lycée Connecté (ENT)</span>
+                      <ArrowRight className="w-3.5 h-3.5 text-zinc-500 shrink-0 ml-1" />
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -661,7 +646,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onAuthenticated }) => {
 
                 {/* Mini Guide */}
                 <div className="p-3 rounded-xl bg-white/[0.025] border border-white/[0.05] text-[11.5px] text-zinc-400 leading-relaxed">
-                  <span className="text-zinc-200 font-medium">Comment obtenir le QR Code :</span> Sur PRONOTE Web (via Lycée Connecté), cliquez sur l'icône{' '}
+                  <span className="text-zinc-200 font-medium">Comment obtenir le QR Code :</span> Sur PRONOTE Web (depuis votre ENT ou navigateur), cliquez sur l'icône{' '}
                   <span className="text-zinc-200">QR Code</span> en haut à droite → choisissez un code à 4 chiffres → capturez le QR Code affiché.
                 </div>
               </form>
