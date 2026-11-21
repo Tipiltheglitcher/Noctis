@@ -594,7 +594,7 @@ export const WebLoginView: React.FC<WebLoginViewProps> = ({ onAuthenticated }) =
                           setSchoolQuery(e.target.value);
                           setSelectedSchoolName(null);
                         }}
-                        placeholder="Ex : Pauillac, 33250, Lycée Odilon Redon…"
+                        placeholder="Ex : Lyon, 69001, Lycée Victor Hugo…"
                         className="w-full pl-10 pr-9 py-2.5 rounded-xl bg-[#08080D] border border-white/[0.1] text-xs text-white focus:outline-none focus:border-accent"
                       />
                       {searchingSchools && (
@@ -639,7 +639,7 @@ export const WebLoginView: React.FC<WebLoginViewProps> = ({ onAuthenticated }) =
                       type="url"
                       value={instanceUrl}
                       onChange={(e) => setInstanceUrl(e.target.value)}
-                      placeholder="https://033xxxx.index-education.net/pronote"
+                      placeholder="https://0690000x.index-education.net/pronote"
                       className="w-full px-3.5 py-2.5 rounded-xl bg-[#08080D] border border-white/[0.1] text-xs text-white focus:outline-none focus:border-accent"
                     />
                   </div>
