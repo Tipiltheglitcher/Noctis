@@ -571,7 +571,7 @@
             </div>
             <a
               id="win-download"
-              href="https://github.com/Tipiltheglitcher/Noctis/releases/latest/download/Noctis-1.0.0-Setup.exe"
+              href="https://github.com/Tipiltheglitcher/Noctis/releases/latest/download/Noctis-1.1.0-Setup.exe"
               download
               class="dl-btn"
             >
@@ -599,8 +599,8 @@
             </div>
             <a
               id="apk-download"
-              href="https://github.com/Tipiltheglitcher/Noctis/releases/latest/download/Noctis-1.0.0.apk"
-              download="Noctis-1.0.0.apk"
+              href="https://github.com/Tipiltheglitcher/Noctis/releases/latest/download/Noctis-1.1.0.apk"
+              download="Noctis-1.1.0.apk"
               class="dl-btn secondary"
             >
               Télécharger pour Android (.apk)
@@ -805,7 +805,7 @@
           });
           if (!res.ok) throw new Error('no release');
           const data = await res.json();
-          const tag = data.tag_name || 'v1.0.0';
+          const tag = data.tag_name || 'v1.1.0';
           const date = data.published_at
             ? new Date(data.published_at).toLocaleDateString('fr-FR', {
                 day: 'numeric',
@@ -851,10 +851,10 @@
               'Vérification Google / VirusTotal en cours…';
           }
         } catch {
-          document.getElementById('version-label').textContent = 'Noctis v1.0.0 · Téléchargement direct';
+          document.getElementById('version-label').textContent = 'Noctis v1.1.0 · Téléchargement direct';
           const apkBtn = document.getElementById('apk-download');
-          apkBtn.href = `https://github.com/${REPO}/releases/latest/download/Noctis-1.0.0.apk`;
-          apkBtn.setAttribute('download', 'Noctis-1.0.0.apk');
+          apkBtn.href = `https://github.com/${REPO}/releases/latest/download/Noctis-1.1.0.apk`;
+          apkBtn.setAttribute('download', 'Noctis-1.1.0.apk');
           apkBtn.textContent = 'Télécharger pour Android (.apk)';
           document.getElementById('changelog-body').textContent =
             'Téléchargement direct de Noctis pour Windows (.exe) et Android (.apk).';
