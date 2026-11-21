@@ -27,7 +27,9 @@ import type {
   StudentProfile,
 } from '@shared/types';
 import {
+  getWebRememberMe,
   inspectWebPronoteInstance,
+  setWebRememberMe,
   type WebSchoolInstanceInfo,
 } from '../webPronoteBridge';
 
@@ -85,6 +87,7 @@ export const WebLoginView: React.FC<WebLoginViewProps> = ({ onAuthenticated }) =
   // Direct credentials state
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(() => getWebRememberMe());
 
   // Shared auth / 2FA state
   const [submitting, setSubmitting] = useState(false);
@@ -245,11 +248,25 @@ export const WebLoginView: React.FC<WebLoginViewProps> = ({ onAuthenticated }) =
   const startCamera = async () => {
     setError(null);
     setCameraError(null);
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError(
+        "Aucune caméra disponible sur ce navigateur. Utilise « Importer une capture » ou « Coller »."
+      );
+      return;
+    }
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: 'environment' } },
-        audio: false,
-      });
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' } },
+          audio: false,
+        });
+      } catch {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false,
+        });
+      }
       streamRef.current = stream;
       setCameraOpen(true);
 
@@ -289,11 +306,51 @@ export const WebLoginView: React.FC<WebLoginViewProps> = ({ onAuthenticated }) =
         };
         rafRef.current = requestAnimationFrame(tick);
       });
-    } catch {
-      setCameraError(
-        "Impossible d'accéder à la caméra. Autorise la caméra ou importe simplement une capture d'écran (ou Ctrl+V sur PC)."
-      );
+    } catch (err) {
+      const name = err instanceof Error ? err.name : '';
+      if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+        setCameraError(
+          "Aucune webcam/caméra détectée sur cet appareil. Fais simplement une capture d'écran (Win+Shift+S) puis clique sur « Coller » ou « Importer »."
+        );
+      } else {
+        setCameraError(
+          "Accès caméra refusé par le navigateur. Autorise la caméra ou utilise « Coller » / « Importer »."
+        );
+      }
       stopCamera();
+    }
+  };
+
+  const handleClipboardButton = async () => {
+    setError(null);
+    setCameraError(null);
+    try {
+      if (navigator.clipboard?.read) {
+        const items = await navigator.clipboard.read();
+        for (const item of items) {
+          const imgType = item.types.find((t) => t.startsWith('image/'));
+          if (imgType) {
+            const blob = await item.getType(imgType);
+            decodeQrFromFile(new File([blob], 'qr.png', { type: imgType }));
+            return;
+          }
+        }
+      }
+      if (navigator.clipboard?.readText) {
+        const text = await navigator.clipboard.readText();
+        const parsed = tryParseQrPayload(text);
+        if (parsed) {
+          setQrData(parsed);
+          setQrRawText(text);
+          setTimeout(() => pinInputRef.current?.focus(), 60);
+          return;
+        }
+      }
+      setError(
+        "Aucune capture QR Code dans ton presse-papiers. Fais d'abord Win + Shift + S sur le QR Code puis clique ici (ou Ctrl + V)."
+      );
+    } catch {
+      setError('Appuie directement sur Ctrl + V pour coller ta capture d’écran.');
     }
   };
 
@@ -679,10 +736,18 @@ export const WebLoginView: React.FC<WebLoginViewProps> = ({ onAuthenticated }) =
 
                 {!qrData ? (
                   <div className="space-y-2.5">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                      <label className="cursor-pointer py-3 px-4 rounded-xl bg-white/[0.06] hover:bg-white/[0.1] border border-white/[0.1] text-xs font-semibold text-white flex items-center justify-center gap-2 transition-colors">
-                        <ImagePlus className="w-4 h-4 text-accent" />
-                        <span>Importer une capture</span>
+                    <div className="grid grid-cols-3 gap-2">
+                      <button
+                        type="button"
+                        onClick={handleClipboardButton}
+                        className="py-2.5 px-2.5 rounded-xl bg-accent/15 hover:bg-accent/25 border border-accent/35 text-xs font-semibold text-white flex flex-col sm:flex-row items-center justify-center gap-1.5 transition-colors"
+                      >
+                        <ClipboardPaste className="w-4 h-4 text-accent shrink-0" />
+                        <span>Coller</span>
+                      </button>
+                      <label className="cursor-pointer py-2.5 px-2.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.1] border border-white/[0.1] text-xs font-semibold text-white flex flex-col sm:flex-row items-center justify-center gap-1.5 transition-colors">
+                        <ImagePlus className="w-4 h-4 text-accent shrink-0" />
+                        <span>Importer</span>
                         <input
                           type="file"
                           accept="image/*"
@@ -697,10 +762,10 @@ export const WebLoginView: React.FC<WebLoginViewProps> = ({ onAuthenticated }) =
                       <button
                         type="button"
                         onClick={cameraOpen ? stopCamera : startCamera}
-                        className="py-3 px-4 rounded-xl bg-white/[0.06] hover:bg-white/[0.1] border border-white/[0.1] text-xs font-semibold text-white flex items-center justify-center gap-2 transition-colors"
+                        className="py-2.5 px-2.5 rounded-xl bg-white/[0.06] hover:bg-white/[0.1] border border-white/[0.1] text-xs font-semibold text-white flex flex-col sm:flex-row items-center justify-center gap-1.5 transition-colors"
                       >
-                        <Camera className="w-4 h-4 text-accent" />
-                        <span>{cameraOpen ? 'Fermer la caméra' : 'Scanner à la caméra'}</span>
+                        <Camera className="w-4 h-4 text-accent shrink-0" />
+                        <span>{cameraOpen ? 'Fermer' : 'Caméra'}</span>
                       </button>
                     </div>
 
@@ -823,6 +888,27 @@ export const WebLoginView: React.FC<WebLoginViewProps> = ({ onAuthenticated }) =
                   className="w-full px-3.5 py-2.5 rounded-xl bg-[#08080D] border border-white/[0.1] text-sm text-white tracking-[0.3em] font-semibold focus:outline-none focus:border-accent"
                 />
               </div>
+
+              {/* Remember me toggle (only scan QR Code ONCE on this device!) */}
+              <label className="flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl bg-white/[0.03] border border-white/[0.07] cursor-pointer select-none">
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold text-zinc-100">
+                    Rester connecté sur cet appareil
+                  </div>
+                  <div className="text-[10.5px] text-zinc-400">
+                    Tu ne fais le QR Code qu'une seule fois (décoche sur un PC partagé).
+                  </div>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => {
+                    setRememberMe(e.target.checked);
+                    setWebRememberMe(e.target.checked);
+                  }}
+                  className="w-4 h-4 accent-[rgb(var(--accent-rgb))] rounded shrink-0"
+                />
+              </label>
 
               {error && (
                 <div className="p-3 rounded-xl bg-rose-500/12 border border-rose-500/30 text-xs text-rose-200 flex items-start gap-2">
@@ -993,7 +1079,7 @@ export const WebLoginView: React.FC<WebLoginViewProps> = ({ onAuthenticated }) =
           <div className="inline-flex items-center justify-center gap-1.5 text-zinc-400">
             <Lock className="w-3 h-3 text-emerald-400" />
             <span>
-              Session éphémère en mémoire uniquement · Aucun mot de passe stocké sur nos serveurs
+              Aucun mot de passe stocké sur nos serveurs · Reconnexion locale uniquement sur ton appareil
             </span>
           </div>
           <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1">

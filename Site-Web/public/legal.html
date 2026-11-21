@@ -243,9 +243,10 @@
             vérifiable publiquement dans <code>Site-Web/cloudflare-worker/worker.js</code>.
           </li>
           <li>
-            <strong>Session éphémère sur le Web :</strong> sur Noctis Web, ta session PRONOTE reste
-            uniquement en mémoire vive de l'onglet et disparaît dès que tu fermes ou recharges la
-            page.
+            <strong>Reconnexion locale optionnelle sur le Web :</strong> si tu coches
+            « Rester connecté sur cet appareil », seul un jeton de reconnexion PRONOTE est enregistré
+            localement dans ton propre navigateur (<code>localStorage</code>) pour éviter de refaire
+            le QR Code à chaque visite. Il est immédiatement supprimé lorsque tu te déconnectes.
           </li>
           <li>
             <strong>Stockage local uniquement :</strong> tes préférences visuelles (couleurs,

@@ -22,6 +22,7 @@ import {
   instance,
   loginCredentials,
   loginQrCode,
+  loginToken,
   menus,
   news,
   newsInformationAcknowledge,
@@ -47,6 +48,7 @@ import {
   type NewsQuestion,
   type NewsSurvey,
   type Period,
+  type RefreshInformation,
   type SessionHandle,
 } from '@blockshub/pawnote-lts';
 import type { Fetcher, Request as PawnoteRequest, Response as PawnoteResponse } from '@literate.ink/utilities';
@@ -77,6 +79,71 @@ import { DEFAULT_APP_SETTINGS } from '@/utils/theme';
 
 const DEMO_URL = 'https://demo.index-education.net/pronote';
 const SETTINGS_KEY = 'noctis_web_settings';
+const WEB_SESSION_KEY = 'noctis_web_session_v1';
+const WEB_REMEMBER_KEY = 'noctis_web_remember';
+
+interface SavedWebSession {
+  url: string;
+  username: string;
+  token: string;
+  deviceUUID: string;
+  kind: AccountKind;
+  navigatorIdentifier?: string;
+}
+
+export function getWebRememberMe(): boolean {
+  try {
+    return localStorage.getItem(WEB_REMEMBER_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
+
+export function setWebRememberMe(remember: boolean): void {
+  try {
+    localStorage.setItem(WEB_REMEMBER_KEY, remember ? '1' : '0');
+    if (!remember) localStorage.removeItem(WEB_SESSION_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+function saveWebSessionToken(refresh: RefreshInformation, deviceUUID: string): void {
+  if (!getWebRememberMe()) return;
+  try {
+    const payload: SavedWebSession = {
+      url: refresh.url,
+      username: refresh.username,
+      token: refresh.token,
+      deviceUUID,
+      kind: refresh.kind,
+      navigatorIdentifier: refresh.navigatorIdentifier,
+    };
+    localStorage.setItem(WEB_SESSION_KEY, JSON.stringify(payload));
+  } catch {
+    // ignore
+  }
+}
+
+function loadWebSessionToken(): SavedWebSession | null {
+  try {
+    const raw = localStorage.getItem(WEB_SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as SavedWebSession;
+    if (!parsed?.url || !parsed?.username || !parsed?.token || !parsed?.deviceUUID) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function clearWebSessionToken(): void {
+  try {
+    localStorage.removeItem(WEB_SESSION_KEY);
+  } catch {
+    // ignore
+  }
+}
 
 function makeUUID(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -494,10 +561,11 @@ class WebPronoteBridge {
       if (!h.shouldCustomPassword && !h.shouldCustomDoubleAuth && h.shouldEnterSource && !h.shouldEnterPIN) {
         await securitySource(session, 'Noctis Web');
         await securitySave(session, h, { mode: DoubleAuthMode.MGDA_NotificationSeulement, deviceName: 'Noctis Web' });
-        await finishLoginManually(session, h.context.authentication, h.context.identity, h.context.initialUsername);
+        const refresh = await finishLoginManually(session, h.context.authentication, h.context.identity, h.context.initialUsername);
         this.reset();
         this.session = session;
         startPresenceInterval(session);
+        if (!isDemo) saveWebSessionToken(refresh, deviceUUID);
         return { ok: true, profile: this.buildProfile(isDemo) };
       }
       this.pendingSecurity = { session, error: err, deviceUUID };
@@ -528,17 +596,62 @@ class WebPronoteBridge {
         onMaximizedChange: () => () => {},
       },
       auth: {
-        // Ephemeral web session by design: always reconnect when reopening tab
-        restoreSession: async () => ({ ok: false }),
-        reconnect: async () => ({ ok: false }),
+        restoreSession: async () => {
+          const saved = loadWebSessionToken();
+          if (!saved) return { ok: false };
+          const session = createSessionHandle(createRelayFetcher());
+          try {
+            const nextRefresh = await loginToken(session, {
+              url: saved.url,
+              kind: saved.kind,
+              username: saved.username,
+              token: saved.token,
+              deviceUUID: saved.deviceUUID,
+              navigatorIdentifier: saved.navigatorIdentifier,
+            });
+            this.reset();
+            this.session = session;
+            startPresenceInterval(session);
+            saveWebSessionToken(nextRefresh, saved.deviceUUID);
+            return { ok: true, profile: this.buildProfile(false) };
+          } catch (err) {
+            if (err instanceof BadCredentialsError) {
+              clearWebSessionToken();
+            }
+            return { ok: false };
+          }
+        },
+        reconnect: async () => {
+          const saved = loadWebSessionToken();
+          if (!saved) return { ok: false };
+          const session = createSessionHandle(createRelayFetcher());
+          try {
+            const nextRefresh = await loginToken(session, {
+              url: saved.url,
+              kind: saved.kind,
+              username: saved.username,
+              token: saved.token,
+              deviceUUID: saved.deviceUUID,
+              navigatorIdentifier: saved.navigatorIdentifier,
+            });
+            this.reset();
+            this.session = session;
+            startPresenceInterval(session);
+            saveWebSessionToken(nextRefresh, saved.deviceUUID);
+            return { ok: true, profile: this.buildProfile(false) };
+          } catch {
+            return { ok: false };
+          }
+        },
         loginQR: async ({ qr, pin }) => {
           const deviceUUID = makeUUID();
           const session = createSessionHandle(createRelayFetcher());
           try {
-            await loginQrCode(session, { qr, pin: pin.trim(), deviceUUID });
+            const refresh = await loginQrCode(session, { qr, pin: pin.trim(), deviceUUID });
             this.reset();
             this.session = session;
             startPresenceInterval(session);
+            saveWebSessionToken(refresh, deviceUUID);
             return { ok: true, profile: this.buildProfile(false) };
           } catch (err) {
             return this.handleSecurity(session, err, deviceUUID, false);
@@ -572,7 +685,7 @@ class WebPronoteBridge {
           }
           const session = createSessionHandle(fetcher);
           try {
-            await loginCredentials(session, {
+            const refresh = await loginCredentials(session, {
               url: cleanedUrl,
               kind: AccountKind.STUDENT,
               username: username.trim(),
@@ -582,6 +695,7 @@ class WebPronoteBridge {
             this.reset();
             this.session = session;
             startPresenceInterval(session);
+            saveWebSessionToken(refresh, deviceUUID);
             return { ok: true, profile: this.buildProfile(false) };
           } catch (err) {
             return this.handleSecurity(session, err, deviceUUID, false);
@@ -625,21 +739,24 @@ class WebPronoteBridge {
               await securitySource(session, (deviceName || 'Noctis Web').slice(0, 30));
             }
             await securitySave(session, error.handle, { pin, deviceName: deviceName || 'Noctis Web' });
-            await finishLoginManually(
+            const refresh = await finishLoginManually(
               session,
               error.handle.context.authentication,
               error.handle.context.identity,
               error.handle.context.initialUsername
             );
+            const savedDeviceUUID = this.pendingSecurity.deviceUUID;
             this.reset();
             this.session = session;
             startPresenceInterval(session);
+            saveWebSessionToken(refresh, savedDeviceUUID);
             return { ok: true, profile: this.buildProfile(false) };
           } catch (e) {
             return { ok: false, error: e instanceof Error ? e.message : 'Erreur 2FA.' };
           }
         },
         logout: async () => {
+          clearWebSessionToken();
           this.reset();
         },
         searchSchools: async (query: string): Promise<SchoolSearchResult[]> => {

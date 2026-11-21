@@ -55,6 +55,7 @@ const SettingsView = lazy(() =>
 );
 
 export default function App() {
+  const [booting, setBooting] = useState(true);
   const [profile, setProfile] = useState<StudentProfile | null>(null);
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
@@ -89,7 +90,22 @@ export default function App() {
   const [loadingMenus, setLoadingMenus] = useState(false);
 
   useEffect(() => {
-    window.pronoteAPI.system.getSettings().then(setSettings).catch(() => {});
+    (async () => {
+      try {
+        setSettings(await window.pronoteAPI.system.getSettings());
+      } catch {
+        // default
+      }
+      try {
+        const restored = await window.pronoteAPI.auth.restoreSession();
+        if (restored.ok && restored.profile) {
+          handleAuthenticated(restored.profile);
+        }
+      } finally {
+        setBooting(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -270,7 +286,17 @@ export default function App() {
         onRefresh={profile ? () => refreshAll(false) : undefined}
       />
 
-      {!profile ? (
+      {booting ? (
+        <div className="flex-1 flex flex-col items-center justify-center obsidian-glow gap-3">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-accent/90 to-accent/30 border border-white/15 flex items-center justify-center shadow-glow">
+            <span className="text-xl font-extrabold text-white">N</span>
+          </div>
+          <div className="flex items-center gap-2 text-xs text-zinc-400">
+            <Loader2 className="w-3.5 h-3.5 text-accent animate-spin" />
+            <span>Reconnexion à ton espace…</span>
+          </div>
+        </div>
+      ) : !profile ? (
         <WebLoginView onAuthenticated={handleAuthenticated} />
       ) : (
         <div
