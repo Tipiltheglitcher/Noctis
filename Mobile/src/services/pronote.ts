@@ -692,23 +692,102 @@ class MobilePronoteService {
       }
     }
 
-    try {
-      const geoUrl = `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(trimmed)}&limit=4`;
-      let geoJson: { features?: Array<{ geometry?: { coordinates?: [number, number] } }> };
+    const norm = (s: string) =>
+      s
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+    const safeQ = trimmed.replace(/["'\\]/g, ' ').trim();
+    const isPostal = /^\d{5}$/.test(safeQ);
+    const rawTokens = safeQ.split(/\s+/).filter((t) => t.length >= 2);
+    const scoreTokens = norm(safeQ)
+      .split(/\s+/)
+      .filter(
+        (t) =>
+          t.length >= 2 &&
+          !['lycee', 'college', 'ecole', 'de', 'du', 'la', 'le', 'les', 'des', 'et'].includes(t)
+      );
 
-      if (Capacitor.isNativePlatform()) {
-        const res = await CapacitorHttp.get({ url: geoUrl });
-        geoJson = typeof res.data === 'string' ? JSON.parse(res.data) : res.data;
-      } else {
-        geoJson = await (await fetch(geoUrl)).json();
+    const fetchJson = async <T,>(url: string): Promise<T | null> => {
+      try {
+        if (Capacitor.isNativePlatform()) {
+          const res = await CapacitorHttp.get({ url });
+          if (res.status < 200 || res.status >= 300) return null;
+          return (typeof res.data === 'string' ? JSON.parse(res.data) : res.data) as T;
+        }
+        const res = await fetch(url);
+        if (!res.ok) return null;
+        return (await res.json()) as T;
+      } catch {
+        return null;
       }
+    };
+
+    try {
+      const tokenClauses = rawTokens.slice(0, 5).map((tok) =>
+        /^\d{2,5}$/.test(tok)
+          ? `code_postal LIKE "${tok}*"`
+          : `(search(nom_etablissement, "${tok}") OR search(nom_commune, "${tok}"))`
+      );
+      const whereClause = isPostal
+        ? `code_postal="${safeQ}" AND (type_etablissement="Lycée" OR type_etablissement="Collège")`
+        : `${tokenClauses.join(' AND ')} AND (type_etablissement="Lycée" OR type_etablissement="Collège")`;
+
+      const eduUrl =
+        'https://data.education.gouv.fr/api/explore/v2.1/catalog/datasets/fr-en-annuaire-education/records?' +
+        new URLSearchParams({
+          where: whereClause,
+          limit: '15',
+          select:
+            'identifiant_de_l_etablissement,nom_etablissement,type_etablissement,code_postal,nom_commune,latitude,longitude',
+        });
+
+      const coordBuckets: Array<{ latitude: number; longitude: number }> = [];
+      const matchedUAIs = new Map<string, { city: string }>();
+      const seenBucket = new Set<string>();
+
+      const eduJson = await fetchJson<{
+        results?: Array<{
+          identifiant_de_l_etablissement?: string;
+          nom_commune?: string;
+          latitude?: number;
+          longitude?: number;
+        }>;
+      }>(eduUrl);
+
+      for (const rec of eduJson?.results ?? []) {
+        if (rec.identifiant_de_l_etablissement) {
+          matchedUAIs.set(rec.identifiant_de_l_etablissement.toLowerCase(), {
+            city: rec.nom_commune || '',
+          });
+        }
+        if (typeof rec.latitude === 'number' && typeof rec.longitude === 'number') {
+          const key = `${rec.latitude.toFixed(2)},${rec.longitude.toFixed(2)}`;
+          if (!seenBucket.has(key)) {
+            seenBucket.add(key);
+            coordBuckets.push({ latitude: rec.latitude, longitude: rec.longitude });
+          }
+        }
+      }
+
+      if (coordBuckets.length === 0) {
+        const geoUrl = `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(trimmed)}&type=municipality&limit=3`;
+        const geoJson = await fetchJson<{
+          features?: Array<{ geometry?: { coordinates?: [number, number] } }>;
+        }>(geoUrl);
+        for (const f of geoJson?.features ?? []) {
+          const coords = f.geometry?.coordinates;
+          if (coords) coordBuckets.push({ latitude: coords[1], longitude: coords[0] });
+        }
+      }
+
+      if (coordBuckets.length === 0) return [];
 
       const byUrl = new Map<string, SchoolSearchResult>();
       await Promise.all(
-        (geoJson.features ?? []).slice(0, 3).map(async (f) => {
-          const coords = f.geometry?.coordinates;
-          if (!coords) return;
-          const [longitude, latitude] = coords;
+        coordBuckets.slice(0, 6).map(async ({ latitude, longitude }) => {
           try {
             const found = await geolocation({ latitude, longitude }, mobileFetcher);
             for (const item of found) {
@@ -728,23 +807,48 @@ class MobilePronoteService {
         })
       );
 
-      const tokens = trimmed
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .split(/\s+/)
-        .filter((t) => t.length >= 2);
+      const scored = Array.from(byUrl.values()).map((r) => {
+        const nName = norm(r.name);
+        const nUrl = r.url.toLowerCase();
+        let score = 0;
 
-      return Array.from(byUrl.values())
-        .sort((a, b) => {
-          const normA = a.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-          const normB = b.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-          const sA = tokens.filter((t) => normA.includes(t)).length;
-          const sB = tokens.filter((t) => normB.includes(t)).length;
-          if (sB !== sA) return sB - sA;
-          return a.distanceKm - b.distanceKm;
-        })
-        .slice(0, 15);
+        for (const [uai, meta] of matchedUAIs.entries()) {
+          if (nUrl.includes(uai)) {
+            score += 120;
+            if (meta.city && scoreTokens.some((t) => norm(meta.city).includes(t))) {
+              score += 20;
+            }
+            break;
+          }
+        }
+
+        if (isPostal && r.postalCode === safeQ) score += 60;
+
+        let tokenHits = 0;
+        for (const t of scoreTokens) {
+          if (nName.includes(t)) {
+            tokenHits++;
+            score += 35;
+          } else if (r.postalCode.startsWith(t)) {
+            tokenHits++;
+            score += 20;
+          }
+        }
+        if (scoreTokens.length > 0 && tokenHits === scoreTokens.length) score += 50;
+
+        return { r, score };
+      });
+
+      const maxScore = scored.reduce((m, x) => Math.max(m, x.score), 0);
+      const cutoff = maxScore >= 120 ? 100 : maxScore >= 35 ? 35 : 0;
+      const filtered = cutoff > 0 ? scored.filter((x) => x.score >= cutoff) : scored;
+
+      filtered.sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        return a.r.distanceKm - b.r.distanceKm;
+      });
+
+      return filtered.slice(0, 15).map((x) => x.r);
     } catch {
       return [];
     }
