@@ -52,9 +52,20 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    sourcemap: false,
+    target: 'es2022',
+    cssCodeSplit: true,
     rollupOptions: {
       input: {
         main: path.resolve(__dirname, 'index.html'),
+      },
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom'],
+          'vendor-icons': ['lucide-react'],
+          'vendor-pronote': ['@blockshub/pawnote-lts'],
+          'vendor-utils': ['dompurify', 'jsqr'],
+        },
       },
     },
   },

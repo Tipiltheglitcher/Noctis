@@ -179,3 +179,18 @@ body,
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
+
+/* Zero-delay touch & butter-smooth scrolling on Android */
+button,
+a,
+select,
+input {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+main {
+  contain: layout style;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+}

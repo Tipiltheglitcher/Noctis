@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, RefreshCw, WifiOff } from 'lucide-react';
 import type {
   AppSettings,
@@ -29,11 +29,18 @@ import { UpdateModal } from './components/UpdateModal';
 import { DashboardView } from './views/DashboardView';
 import { TimetableView } from './views/TimetableView';
 import { HomeworkView } from './views/HomeworkView';
-import { GradesView } from './views/GradesView';
-import { AttendanceView } from './views/AttendanceView';
-import { MessagesView } from './views/MessagesView';
-import { MenusView } from './views/MenusView';
-import { SettingsView } from './views/SettingsView';
+
+const GradesView = lazy(() => import('./views/GradesView').then((m) => ({ default: m.GradesView })));
+const AttendanceView = lazy(() =>
+  import('./views/AttendanceView').then((m) => ({ default: m.AttendanceView }))
+);
+const MessagesView = lazy(() =>
+  import('./views/MessagesView').then((m) => ({ default: m.MessagesView }))
+);
+const MenusView = lazy(() => import('./views/MenusView').then((m) => ({ default: m.MenusView })));
+const SettingsView = lazy(() =>
+  import('./views/SettingsView').then((m) => ({ default: m.SettingsView }))
+);
 
 const DEFAULT_SETTINGS: AppSettings = DEFAULT_APP_SETTINGS;
 
@@ -88,6 +95,9 @@ export default function App() {
   const knownCanceledIdsRef = useRef<Set<string> | null>(null);
   const hasAutoAdvancedRef = useRef(false);
   const cachedSnapRef = useRef<OfflineCacheSnapshot | null>(null);
+  const timetableWeekCacheRef = useRef<Map<string, TimetableResponse>>(new Map());
+  const gradesCacheRef = useRef<Map<string, GradesOverviewDTO>>(new Map());
+  const attendanceCacheRef = useRef<Map<string, AttendanceDTO>>(new Map());
 
   useEffect(() => {
     applyThemeToDocument(settings);
@@ -176,6 +186,7 @@ export default function App() {
       if (!silent) setLoadingTimetable(true);
       try {
         const data = await window.pronoteAPI.data.getTimetable(date.toISOString());
+        timetableWeekCacheRef.current.set(getWeekKey(date), data);
         setTimetable(data);
 
         const canceledNow = data.items.filter((i) => i.canceled);
@@ -250,6 +261,8 @@ export default function App() {
     if (!silent) setLoadingGrades(true);
     try {
       const data = await window.pronoteAPI.data.getGrades(periodId || undefined);
+      if (data.periodId) gradesCacheRef.current.set(data.periodId, data);
+      if (periodId) gradesCacheRef.current.set(periodId, data);
       setGrades(data);
 
       if (knownGradeIdsRef.current !== null) {
@@ -281,6 +294,8 @@ export default function App() {
       if (!silent) setLoadingAttendance(true);
       try {
         const data = await window.pronoteAPI.data.getAttendance(periodId || undefined);
+        if (data.periodId) attendanceCacheRef.current.set(data.periodId, data);
+        if (periodId) attendanceCacheRef.current.set(periodId, data);
         setAttendance(data);
         return true;
       } catch (err) {
@@ -355,28 +370,36 @@ export default function App() {
         }
       }
 
-      const tasks: Promise<boolean>[] = [];
+      // Wave 1 (Critical Dashboard data first — avoids head-of-line blocking on PRONOTE's sequential session queue)
+      const wave1: Promise<boolean>[] = [];
       if (profile.availableTabs.timetable) {
-        tasks.push(fetchTimetableFor(timetableDate, silent, allowAutoAdvance));
+        wave1.push(fetchTimetableFor(timetableDate, silent, allowAutoAdvance));
       }
-      if (profile.availableTabs.homework) tasks.push(fetchHomework(silent));
-      if (profile.availableTabs.grades) tasks.push(fetchGrades(selectedGradePeriodId, silent));
-      if (profile.availableTabs.attendance) {
-        tasks.push(fetchAttendance(selectedAttendancePeriodId, silent));
-      }
-      if (profile.availableTabs.news || profile.availableTabs.discussions) {
-        tasks.push(fetchMessages(silent));
-      }
-      if (profile.availableTabs.menus) tasks.push(fetchMenus(menusDate, silent));
+      if (profile.availableTabs.homework) wave1.push(fetchHomework(silent));
+      if (profile.availableTabs.grades) wave1.push(fetchGrades(selectedGradePeriodId, silent));
 
-      const results = await Promise.all(tasks);
+      const r1 = await Promise.all(wave1);
+
+      // Wave 2 (Secondary views in background immediately after Dashboard is ready)
+      const wave2: Promise<boolean>[] = [];
+      if (profile.availableTabs.news || profile.availableTabs.discussions) {
+        wave2.push(fetchMessages(silent));
+      }
+      if (profile.availableTabs.attendance) {
+        wave2.push(fetchAttendance(selectedAttendancePeriodId, silent));
+      }
+      if (profile.availableTabs.menus) wave2.push(fetchMenus(menusDate, silent));
+
+      const r2 = await Promise.all(wave2);
+      const results = [...r1, ...r2];
+      const totalTasks = wave1.length + wave2.length;
       const anySuccess = results.some(Boolean);
       if (anySuccess) {
         const nowIso = new Date().toISOString();
         setIsOffline(false);
         setLastSyncedAt(nowIso);
         setLastUpdated(new Date(nowIso));
-      } else if (tasks.length > 0) {
+      } else if (totalTasks > 0) {
         setIsOffline(true);
       }
       setRefreshing(false);
@@ -405,6 +428,15 @@ export default function App() {
     if (!isOffline) {
       refreshAll(false, true);
     }
+    // Warm up lazy view chunks during idle time so switching tabs is 0ms instant
+    const warmTimer = setTimeout(() => {
+      void import('./views/GradesView');
+      void import('./views/MessagesView');
+      void import('./views/AttendanceView');
+      void import('./views/MenusView');
+      void import('./views/SettingsView');
+    }, 1200);
+    return () => clearTimeout(warmTimer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);
 
@@ -490,6 +522,9 @@ export default function App() {
     setAutoAdvanceNote(null);
     hasAutoAdvancedRef.current = false;
     cachedSnapRef.current = null;
+    timetableWeekCacheRef.current.clear();
+    gradesCacheRef.current.clear();
+    attendanceCacheRef.current.clear();
     setTimetable(null);
     setHomework([]);
     setGrades(null);
@@ -505,7 +540,19 @@ export default function App() {
   const handleChangeTimetableDate = (nextDate: Date) => {
     hasAutoAdvancedRef.current = true;
     setAutoAdvanceNote(null);
+    const prevKey = getWeekKey(timetableDate);
+    const key = getWeekKey(nextDate);
     setTimetableDate(nextDate);
+    // Same week click in Day mode: instant 0ms switch, zero network call!
+    if (key === prevKey && timetable) {
+      return;
+    }
+    const memCached = timetableWeekCacheRef.current.get(key) ?? cachedSnapRef.current?.timetables?.[key];
+    if (memCached) {
+      setTimetable(memCached);
+      if (!isOffline) fetchTimetableFor(nextDate, true, false);
+      return;
+    }
     fetchTimetableFor(nextDate, false, false);
   };
 
@@ -517,11 +564,24 @@ export default function App() {
   const handleSelectGradePeriod = (periodId: string) => {
     setSelectedGradePeriodId(periodId);
     knownGradeIdsRef.current = null;
+    const memCached = gradesCacheRef.current.get(periodId) ?? cachedSnapRef.current?.grades?.[periodId];
+    if (memCached) {
+      setGrades(memCached);
+      if (!isOffline) fetchGrades(periodId, true);
+      return;
+    }
     fetchGrades(periodId, false);
   };
 
   const handleSelectAttendancePeriod = (periodId: string) => {
     setSelectedAttendancePeriodId(periodId);
+    const memCached =
+      attendanceCacheRef.current.get(periodId) ?? cachedSnapRef.current?.attendance?.[periodId];
+    if (memCached) {
+      setAttendance(memCached);
+      if (!isOffline) fetchAttendance(periodId, true);
+      return;
+    }
     fetchAttendance(periodId, false);
   };
 
@@ -650,6 +710,14 @@ export default function App() {
           />
 
           <main className="flex-1 min-w-0 overflow-y-auto obsidian-glow bg-[#07070A]">
+            <Suspense
+              fallback={
+                <div className="h-full flex items-center justify-center text-xs text-zinc-500 gap-2">
+                  <Loader2 className="w-4 h-4 text-accent animate-spin" />
+                  <span>Chargement…</span>
+                </div>
+              }
+            >
             {activeTab === 'dashboard' && (
               <DashboardView
                 profile={profile}
@@ -745,6 +813,7 @@ export default function App() {
                 onLogout={handleLogout}
               />
             )}
+            </Suspense>
           </main>
         </div>
       )}

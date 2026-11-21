@@ -118,6 +118,7 @@ class MobilePronoteService {
   private newsMap = new Map<string, NewsInformation | NewsSurvey>();
   private discussionsMap = new Map<string, Discussion>();
   private cacheMem: OfflineCacheSnapshot | null = null;
+  private cacheSaveTimer: ReturnType<typeof setTimeout> | null = null;
   private disconnectMessagingDisabled = false;
 
   public getRightToDisconnectFromServer(): boolean {
@@ -174,7 +175,13 @@ class MobilePronoteService {
         }
       }
       this.cacheMem = snap;
-      await Preferences.set({ key: CACHE_KEY, value: JSON.stringify(snap) });
+      if (this.cacheSaveTimer) clearTimeout(this.cacheSaveTimer);
+      this.cacheSaveTimer = setTimeout(() => {
+        this.cacheSaveTimer = null;
+        if (this.cacheMem) {
+          void Preferences.set({ key: CACHE_KEY, value: JSON.stringify(this.cacheMem) }).catch(() => {});
+        }
+      }, 450);
     } catch {
       // ignore storage quota errors
     }
@@ -602,6 +609,10 @@ class MobilePronoteService {
   }
 
   public async logout(): Promise<void> {
+    if (this.cacheSaveTimer) {
+      clearTimeout(this.cacheSaveTimer);
+      this.cacheSaveTimer = null;
+    }
     this.resetSession();
     this.currentAuth = null;
     this.isDemo = false;

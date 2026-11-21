@@ -90,6 +90,9 @@ export default function App() {
 
   const hasAutoAdvancedRef = useRef(false);
   const cachedSnapRef = useRef<OfflineCacheSnapshot | null>(null);
+  const timetableWeekCacheRef = useRef<Map<string, TimetableResponse>>(new Map());
+  const gradesCacheRef = useRef<Map<string, GradesOverviewDTO>>(new Map());
+  const attCacheRef = useRef<Map<string, AttendanceDTO>>(new Map());
 
   useEffect(() => {
     applyMobileThemeToDocument(settings);
@@ -209,8 +212,10 @@ export default function App() {
         }
       }
 
-      const settled = await Promise.allSettled([
+      // Wave 1: Visible Dashboard essentials first (avoids PRONOTE sequential queue head-of-line blocking)
+      const wave1 = await Promise.allSettled([
         mobilePronote.getTimetable(timetableDate).then(async (tt) => {
+          timetableWeekCacheRef.current.set(getWeekKey(timetableDate), tt);
           setTimetable(tt);
           if (allowAutoAdvance && !hasAutoAdvancedRef.current) {
             hasAutoAdvancedRef.current = true;
@@ -220,6 +225,7 @@ export default function App() {
               setAutoAdvanceNote(adv.label);
               if (getWeekKey(adv.targetDate) !== getWeekKey(timetableDate)) {
                 const nextWeekTt = await mobilePronote.getTimetable(adv.targetDate);
+                timetableWeekCacheRef.current.set(getWeekKey(adv.targetDate), nextWeekTt);
                 setTimetable(nextWeekTt);
               }
             }
@@ -231,13 +237,15 @@ export default function App() {
           return true;
         }),
         mobilePronote.getGrades(gradePeriodId || undefined).then((g) => {
+          if (g.periodId) gradesCacheRef.current.set(g.periodId, g);
+          if (gradePeriodId) gradesCacheRef.current.set(gradePeriodId, g);
           setGrades(g);
           return true;
         }),
-        mobilePronote.getAttendance(attPeriodId || undefined).then((a) => {
-          setAttendance(a);
-          return true;
-        }),
+      ]);
+
+      // Wave 2: Secondary tabs in background immediately after Dashboard is ready
+      const wave2 = await Promise.allSettled([
         mobilePronote.getNews().then((n) => {
           setNews(n);
           setMessagingDisabled(mobilePronote.getRightToDisconnectFromServer());
@@ -248,12 +256,19 @@ export default function App() {
           setMessagingDisabled(mobilePronote.getRightToDisconnectFromServer());
           return true;
         }),
+        mobilePronote.getAttendance(attPeriodId || undefined).then((a) => {
+          if (a.periodId) attCacheRef.current.set(a.periodId, a);
+          if (attPeriodId) attCacheRef.current.set(attPeriodId, a);
+          setAttendance(a);
+          return true;
+        }),
         mobilePronote.getMenus(menusDate).then((m) => {
           setMenus(m);
           return true;
         }),
       ]);
 
+      const settled = [...wave1, ...wave2];
       const anySuccess = settled.some((s) => s.status === 'fulfilled');
       if (anySuccess) {
         setIsOffline(false);
@@ -328,21 +343,46 @@ export default function App() {
   const handleChangeTimetableDate = async (d: Date) => {
     hasAutoAdvancedRef.current = true;
     setAutoAdvanceNote(null);
+    const prevKey = getWeekKey(timetableDate);
+    const nextKey = getWeekKey(d);
     setTimetableDate(d);
+
+    // Same week click (Mon-Fri switcher): instant 0ms switch, no network call needed!
+    if (nextKey === prevKey && timetable) {
+      return;
+    }
+
+    const memCached =
+      timetableWeekCacheRef.current.get(nextKey) ?? cachedSnapRef.current?.timetables?.[nextKey];
+    if (memCached) {
+      setTimetable(memCached);
+      if (isOffline) return;
+      // Refresh silently in background without showing a spinner
+      mobilePronote
+        .getTimetable(d)
+        .then((tt) => {
+          timetableWeekCacheRef.current.set(nextKey, tt);
+          setTimetable(tt);
+        })
+        .catch(() => {});
+      return;
+    }
+
     if (isOffline) {
       const snap = cachedSnapRef.current ?? (await mobilePronote.loadOfflineSnapshot());
-      const cached = snap?.timetables?.[getWeekKey(d)];
+      const cached = snap?.timetables?.[nextKey];
       if (cached) setTimetable(cached);
       return;
     }
     setLoadingTt(true);
     try {
       const tt = await mobilePronote.getTimetable(d);
+      timetableWeekCacheRef.current.set(nextKey, tt);
       setTimetable(tt);
     } catch {
       setIsOffline(true);
       const snap = cachedSnapRef.current ?? (await mobilePronote.loadOfflineSnapshot());
-      const cached = snap?.timetables?.[getWeekKey(d)];
+      const cached = snap?.timetables?.[nextKey];
       if (cached) setTimetable(cached);
     } finally {
       setLoadingTt(false);
@@ -478,14 +518,22 @@ export default function App() {
                 selectedPeriodId={gradePeriodId}
                 onSelectPeriod={async (id) => {
                   setGradePeriodId(id);
+                  const cached =
+                    gradesCacheRef.current.get(id) ?? cachedSnapRef.current?.grades?.[id];
+                  if (cached) setGrades(cached);
                   if (isOffline) {
-                    const snap = cachedSnapRef.current ?? (await mobilePronote.loadOfflineSnapshot());
-                    if (snap?.grades?.[id]) setGrades(snap.grades[id]);
+                    if (!cached) {
+                      const snap = await mobilePronote.loadOfflineSnapshot();
+                      if (snap?.grades?.[id]) setGrades(snap.grades[id]);
+                    }
                     return;
                   }
                   mobilePronote
                     .getGrades(id)
-                    .then(setGrades)
+                    .then((g) => {
+                      gradesCacheRef.current.set(id, g);
+                      setGrades(g);
+                    })
                     .catch(() => setIsOffline(true));
                 }}
               />
@@ -497,14 +545,22 @@ export default function App() {
                 selectedPeriodId={attPeriodId}
                 onSelectPeriod={async (id) => {
                   setAttPeriodId(id);
+                  const cached =
+                    attCacheRef.current.get(id) ?? cachedSnapRef.current?.attendance?.[id];
+                  if (cached) setAttendance(cached);
                   if (isOffline) {
-                    const snap = cachedSnapRef.current ?? (await mobilePronote.loadOfflineSnapshot());
-                    if (snap?.attendance?.[id]) setAttendance(snap.attendance[id]);
+                    if (!cached) {
+                      const snap = await mobilePronote.loadOfflineSnapshot();
+                      if (snap?.attendance?.[id]) setAttendance(snap.attendance[id]);
+                    }
                     return;
                   }
                   mobilePronote
                     .getAttendance(id)
-                    .then(setAttendance)
+                    .then((a) => {
+                      attCacheRef.current.set(id, a);
+                      setAttendance(a);
+                    })
                     .catch(() => setIsOffline(true));
                 }}
               />
@@ -569,6 +625,9 @@ export default function App() {
                 onLogout={async () => {
                   await mobilePronote.logout();
                   cachedSnapRef.current = null;
+                  timetableWeekCacheRef.current.clear();
+                  gradesCacheRef.current.clear();
+                  attCacheRef.current.clear();
                   hasAutoAdvancedRef.current = false;
                   setIsOffline(false);
                   setLastSyncedAt(null);

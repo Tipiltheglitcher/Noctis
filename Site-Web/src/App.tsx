@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   LayoutDashboard,
   CalendarDays,
@@ -9,6 +9,7 @@ import {
   MessageSquareText,
   UtensilsCrossed,
   Settings,
+  Loader2,
   X,
 } from 'lucide-react';
 import type {
@@ -27,11 +28,6 @@ import { Sidebar } from '../../PC/src/components/Sidebar';
 import { DashboardView } from '../../PC/src/views/DashboardView';
 import { TimetableView } from '../../PC/src/views/TimetableView';
 import { HomeworkView } from '../../PC/src/views/HomeworkView';
-import { GradesView } from '../../PC/src/views/GradesView';
-import { AttendanceView } from '../../PC/src/views/AttendanceView';
-import { MessagesView } from '../../PC/src/views/MessagesView';
-import { MenusView } from '../../PC/src/views/MenusView';
-import { SettingsView } from '../../PC/src/views/SettingsView';
 import { applyThemeToDocument, DEFAULT_APP_SETTINGS } from '@/utils/theme';
 import {
   evaluateDayAutoAdvance,
@@ -41,6 +37,22 @@ import {
 } from '@/utils/schoolTime';
 import { WebTopBar } from './components/WebTopBar';
 import { WebLoginView } from './components/WebLoginView';
+
+const GradesView = lazy(() =>
+  import('../../PC/src/views/GradesView').then((m) => ({ default: m.GradesView }))
+);
+const AttendanceView = lazy(() =>
+  import('../../PC/src/views/AttendanceView').then((m) => ({ default: m.AttendanceView }))
+);
+const MessagesView = lazy(() =>
+  import('../../PC/src/views/MessagesView').then((m) => ({ default: m.MessagesView }))
+);
+const MenusView = lazy(() =>
+  import('../../PC/src/views/MenusView').then((m) => ({ default: m.MenusView }))
+);
+const SettingsView = lazy(() =>
+  import('../../PC/src/views/SettingsView').then((m) => ({ default: m.SettingsView }))
+);
 
 export default function App() {
   const [profile, setProfile] = useState<StudentProfile | null>(null);
@@ -168,12 +180,16 @@ export default function App() {
     async (allowAutoAdvance = false) => {
       if (!profile) return;
       setRefreshing(true);
+      // Wave 1: Visible Dashboard essentials first
       await Promise.allSettled([
         fetchTimetableFor(timetableDate, allowAutoAdvance),
         fetchHomework(),
         fetchGrades(gradePeriodId),
-        fetchAttendance(attPeriodId),
+      ]);
+      // Wave 2: Secondary tabs right after
+      await Promise.allSettled([
         fetchMessages(),
+        fetchAttendance(attPeriodId),
         fetchMenus(menusDate),
       ]);
       setRefreshing(false);
@@ -277,6 +293,14 @@ export default function App() {
           </div>
 
           <main className="flex-1 min-w-0 min-h-0 overflow-y-auto obsidian-glow bg-[#07070A]">
+            <Suspense
+              fallback={
+                <div className="h-full flex items-center justify-center text-xs text-zinc-500 gap-2">
+                  <Loader2 className="w-4 h-4 text-accent animate-spin" />
+                  <span>Chargement…</span>
+                </div>
+              }
+            >
             {activeTab === 'dashboard' && (
               <DashboardView
                 profile={profile}
@@ -373,7 +397,7 @@ export default function App() {
               <SettingsView
                 profile={profile}
                 settings={settings}
-                appVersion="Web 1.1.1"
+                appVersion="Web 1.2.0"
                 checkingUpdate={false}
                 updateFeedback="Tu utilises Noctis Web (toujours à jour). Pour la connexion ENT intégrée et le mode hors ligne, télécharge Noctis PC ou Android."
                 onCheckUpdates={() => {
@@ -386,6 +410,7 @@ export default function App() {
                 onLogout={handleLogout}
               />
             )}
+            </Suspense>
           </main>
 
           {/* Mobile / iPhone Bottom Nav Bar */}

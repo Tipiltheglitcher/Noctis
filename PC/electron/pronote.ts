@@ -81,7 +81,7 @@ import {
   loadAuthSession,
   loadOfflineCache,
   saveAuthSession,
-  saveOfflineCache,
+  saveOfflineCacheAsync,
   type SavedAuthData,
 } from './storage';
 
@@ -113,6 +113,7 @@ class PronoteService {
   private newsMap = new Map<string, NewsInformation | NewsSurvey>();
   private discussionsMap = new Map<string, Discussion>();
   private cacheMem: OfflineCacheSnapshot | null = null;
+  private cacheSaveTimer: ReturnType<typeof setTimeout> | null = null;
   private disconnectMessagingDisabled = false;
 
   public getOfflineSnapshot(): OfflineCacheSnapshot | null {
@@ -157,7 +158,13 @@ class PronoteService {
         }
       }
       this.cacheMem = snap;
-      saveOfflineCache(snap);
+      if (this.cacheSaveTimer) clearTimeout(this.cacheSaveTimer);
+      this.cacheSaveTimer = setTimeout(() => {
+        this.cacheSaveTimer = null;
+        if (this.cacheMem) {
+          void saveOfflineCacheAsync(this.cacheMem);
+        }
+      }, 400);
     } catch {
       // ignore
     }
@@ -564,6 +571,10 @@ class PronoteService {
   }
 
   public logout(): void {
+    if (this.cacheSaveTimer) {
+      clearTimeout(this.cacheSaveTimer);
+      this.cacheSaveTimer = null;
+    }
     this.resetSession();
     this.currentAuth = null;
     this.isDemo = false;

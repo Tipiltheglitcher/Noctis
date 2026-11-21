@@ -158,6 +158,14 @@ export function saveOfflineCache(snapshot: OfflineCacheSnapshot): void {
   }
 }
 
+export async function saveOfflineCacheAsync(snapshot: OfflineCacheSnapshot): Promise<void> {
+  try {
+    await fs.promises.writeFile(getOfflineCachePath(), JSON.stringify(snapshot), 'utf8');
+  } catch (err) {
+    console.warn('[storage] Failed to persist offline cache async:', err);
+  }
+}
+
 export function clearOfflineCache(): void {
   const filePath = getOfflineCachePath();
   if (fs.existsSync(filePath)) {

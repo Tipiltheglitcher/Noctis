@@ -19,6 +19,7 @@ import {
   frequency,
   geolocation,
   gradesOverview,
+  instance,
   loginCredentials,
   loginQrCode,
   menus,
@@ -550,10 +551,29 @@ class WebPronoteBridge {
         cancelENT: async () => {},
         loginCredentials: async ({ url, username, password }) => {
           const deviceUUID = makeUUID();
-          const session = createSessionHandle(createRelayFetcher());
+          const fetcher = createRelayFetcher();
+          const cleanedUrl = cleanURL(url);
+          try {
+            const info = await instance(cleanedUrl, fetcher);
+            if (info.casURL) {
+              let casHost = info.casURL;
+              try {
+                casHost = new URL(info.casURL).hostname;
+              } catch {
+                // keep raw casURL
+              }
+              return {
+                ok: false,
+                error: `ENT_REQUIRED::Cet établissement passe par un ENT (${casHost}). La connexion par identifiants directs PRONOTE est désactivée par ton établissement : utilise l'onglet « QR Code (ENT) » (10 secondes) ou télécharge Noctis PC / Android pour la connexion ENT automatique.`,
+              };
+            }
+          } catch {
+            // continue to loginCredentials if instance check fails
+          }
+          const session = createSessionHandle(fetcher);
           try {
             await loginCredentials(session, {
-              url: cleanURL(url),
+              url: cleanedUrl,
               kind: AccountKind.STUDENT,
               username: username.trim(),
               password,

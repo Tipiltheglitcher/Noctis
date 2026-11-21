@@ -43,6 +43,8 @@ function createMainWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      spellcheck: false,
+      v8CacheOptions: 'code',
     },
   });
 

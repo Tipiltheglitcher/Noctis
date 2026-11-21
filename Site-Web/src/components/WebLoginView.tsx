@@ -557,9 +557,32 @@ export const WebLoginView: React.FC<WebLoginViewProps> = ({ onAuthenticated }) =
                   </div>
 
                   {error && (
-                    <div className="p-3 rounded-xl bg-rose-500/12 border border-rose-500/30 text-xs text-rose-200 flex items-start gap-2">
-                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                      <span>{error}</span>
+                    <div
+                      className={`p-3.5 rounded-xl border text-xs space-y-2.5 ${
+                        error.startsWith('ENT_REQUIRED::')
+                          ? 'bg-amber-500/12 border-amber-400/35 text-amber-100'
+                          : 'bg-rose-500/12 border-rose-500/30 text-rose-200'
+                      }`}
+                    >
+                      <div className="flex items-start gap-2">
+                        <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                        <span className="leading-relaxed">
+                          {error.replace(/^ENT_REQUIRED::/, '')}
+                        </span>
+                      </div>
+                      {error.startsWith('ENT_REQUIRED::') && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMode('qr');
+                            setError(null);
+                          }}
+                          className="w-full py-2 px-3 rounded-lg bg-accent text-black font-bold text-xs flex items-center justify-center gap-1.5 hover:opacity-90"
+                        >
+                          <QrCode className="w-3.5 h-3.5" />
+                          Passer sur la connexion QR Code (ENT)
+                        </button>
+                      )}
                     </div>
                   )}
 
@@ -704,9 +727,32 @@ export const WebLoginView: React.FC<WebLoginViewProps> = ({ onAuthenticated }) =
                   </p>
 
                   {error && (
-                    <div className="p-3 rounded-xl bg-rose-500/12 border border-rose-500/30 text-xs text-rose-200 flex items-start gap-2">
-                      <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                      <span>{error}</span>
+                    <div
+                      className={`p-3.5 rounded-xl border text-xs space-y-2.5 ${
+                        error.startsWith('ENT_REQUIRED::')
+                          ? 'bg-amber-500/12 border-amber-400/35 text-amber-100'
+                          : 'bg-rose-500/12 border-rose-500/30 text-rose-200'
+                      }`}
+                    >
+                      <div className="flex items-start gap-2">
+                        <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                        <span className="leading-relaxed">
+                          {error.replace(/^ENT_REQUIRED::/, '')}
+                        </span>
+                      </div>
+                      {error.startsWith('ENT_REQUIRED::') && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setMode('qr');
+                            setError(null);
+                          }}
+                          className="w-full py-2 px-3 rounded-lg bg-accent text-black font-bold text-xs flex items-center justify-center gap-1.5 hover:opacity-90"
+                        >
+                          <QrCode className="w-3.5 h-3.5" />
+                          Passer sur la connexion QR Code (ENT)
+                        </button>
+                      )}
                     </div>
                   )}
 
