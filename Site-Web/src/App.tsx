@@ -32,6 +32,7 @@ import { AttendanceView } from '../../PC/src/views/AttendanceView';
 import { MessagesView } from '../../PC/src/views/MessagesView';
 import { MenusView } from '../../PC/src/views/MenusView';
 import { SettingsView } from '../../PC/src/views/SettingsView';
+import { applyThemeToDocument, DEFAULT_APP_SETTINGS } from '@/utils/theme';
 import { WebTopBar } from './components/WebTopBar';
 
 export default function App() {
@@ -39,9 +40,8 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
   const [settings, setSettings] = useState<AppSettings>({
-    accent: 'violet',
+    ...DEFAULT_APP_SETTINGS,
     notificationsEnabled: false,
-    refreshIntervalMinutes: 10,
   });
   const [refreshing, setRefreshing] = useState(false);
 
@@ -74,8 +74,8 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    document.documentElement.setAttribute('data-accent', settings.accent);
-  }, [settings.accent]);
+    applyThemeToDocument(settings);
+  }, [settings]);
 
   const fetchTimetableFor = useCallback(async (date: Date) => {
     setLoadingTimetable(true);
@@ -215,7 +215,11 @@ export default function App() {
           Chargement de la démo Noctis…
         </div>
       ) : (
-        <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-hidden">
+        <div
+          className={`flex-1 min-h-0 flex flex-col overflow-hidden ${
+            settings.sidebarPosition === 'right' ? 'md:flex-row-reverse' : 'md:flex-row'
+          }`}
+        >
           {/* Desktop Sidebar */}
           <div className="hidden md:flex shrink-0">
             <Sidebar
@@ -224,6 +228,8 @@ export default function App() {
               profile={profile}
               undoneHomeworkCount={undoneCount}
               unreadMessagesCount={unreadCount}
+              compact={Boolean(settings.sidebarCompact)}
+              position={settings.sidebarPosition || 'left'}
               onLogout={handleLogout}
             />
           </div>
@@ -237,6 +243,9 @@ export default function App() {
                 grades={grades}
                 news={news}
                 loading={refreshing}
+                layout={settings.dashboardLayout || 'bento'}
+                widgets={settings.dashboardWidgets}
+                showBreaks={settings.showBreaks !== false}
                 onNavigate={setActiveTab}
                 onToggleHomework={handleToggleHomework}
               />
@@ -247,6 +256,9 @@ export default function App() {
                 homework={homework}
                 selectedDate={timetableDate}
                 loading={loadingTimetable}
+                defaultViewMode={settings.defaultTimetableView || 'week'}
+                courseCardStyle={settings.courseCardStyle || 'left'}
+                showBreaks={settings.showBreaks !== false}
                 onChangeDate={(d) => {
                   setTimetableDate(d);
                   fetchTimetableFor(d);

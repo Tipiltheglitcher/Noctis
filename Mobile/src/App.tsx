@@ -39,6 +39,7 @@ import {
   getWeekKey,
   isWeekend,
 } from './utils/schoolTime';
+import { applyMobileThemeToDocument, DEFAULT_MOBILE_SETTINGS } from './utils/theme';
 import { MobileLogin } from './components/MobileLogin';
 import { MobileUpdateSheet } from './components/MobileUpdateSheet';
 import {
@@ -57,7 +58,7 @@ export default function App() {
   const [profile, setProfile] = useState<StudentProfile | null>(null);
   const [tab, setTab] = useState<MobileTab>('dashboard');
   const [moreOpen, setMoreOpen] = useState(false);
-  const [settings, setSettings] = useState<MobileSettings>({ accent: 'violet' });
+  const [settings, setSettings] = useState<MobileSettings>(DEFAULT_MOBILE_SETTINGS);
   const [refreshing, setRefreshing] = useState(false);
 
   // Offline / sync state
@@ -91,8 +92,19 @@ export default function App() {
   const cachedSnapRef = useRef<OfflineCacheSnapshot | null>(null);
 
   useEffect(() => {
-    document.documentElement.setAttribute('data-accent', settings.accent);
-  }, [settings.accent]);
+    applyMobileThemeToDocument(settings);
+    if (Capacitor.isNativePlatform()) {
+      const bg =
+        settings.background === 'amoled'
+          ? '#000000'
+          : settings.background === 'midnight'
+          ? '#050814'
+          : settings.background === 'graphite'
+          ? '#111216'
+          : '#060608';
+      StatusBar.setBackgroundColor({ color: bg }).catch(() => {});
+    }
+  }, [settings]);
 
   const hydrateFromSnapshot = useCallback((snap: OfflineCacheSnapshot, targetDate: Date) => {
     cachedSnapRef.current = snap;
@@ -116,7 +128,11 @@ export default function App() {
 
     (async () => {
       try {
-        setSettings(await mobilePronote.loadSettings());
+        const loadedSettings = await mobilePronote.loadSettings();
+        setSettings(loadedSettings);
+        if (loadedSettings.defaultTab) {
+          setTab(loadedSettings.defaultTab);
+        }
       } catch {
         // default
       }
@@ -293,7 +309,7 @@ export default function App() {
     setIsOffline(false);
     setTimetableDate(getInitialSchoolDate());
     setAutoAdvanceNote(isWeekend(new Date()) ? 'Week-end · Affichage de lundi' : null);
-    setTab('dashboard');
+    setTab(settings.defaultTab || 'dashboard');
     setGradePeriodId(p.gradePeriods.find((x) => x.isDefault)?.id || p.gradePeriods[0]?.id || '');
     setAttPeriodId(p.attendancePeriods.find((x) => x.isDefault)?.id || p.attendancePeriods[0]?.id || '');
     setProfile(p);
@@ -433,6 +449,8 @@ export default function App() {
                 grades={grades}
                 news={news}
                 messagingDisabled={messagingDisabled}
+                widgets={settings.dashboardWidgets}
+                showBreaks={settings.showBreaks !== false}
                 onNavigate={setTab}
                 onToggleHomework={handleToggleHw}
               />
@@ -444,6 +462,8 @@ export default function App() {
                 selectedDate={timetableDate}
                 loading={loadingTt}
                 autoAdvanceNote={autoAdvanceNote}
+                courseCardStyle={settings.courseCardStyle || 'left'}
+                showBreaks={settings.showBreaks !== false}
                 onChangeDate={handleChangeTimetableDate}
                 onToggleHomework={handleToggleHw}
               />
@@ -531,7 +551,17 @@ export default function App() {
                 settings={settings}
                 checkingUpdate={checkingUpdate}
                 updateMsg={updateMsg}
-                onUpdateSettings={async (next) => {
+                onUpdateSettings={async (partial) => {
+                  const next: MobileSettings = {
+                    ...settings,
+                    ...partial,
+                    dashboardWidgets: partial.dashboardWidgets
+                      ? {
+                          ...(settings.dashboardWidgets ?? DEFAULT_MOBILE_SETTINGS.dashboardWidgets!),
+                          ...partial.dashboardWidgets,
+                        }
+                      : settings.dashboardWidgets,
+                  };
                   setSettings(next);
                   await mobilePronote.saveSettings(next);
                 }}

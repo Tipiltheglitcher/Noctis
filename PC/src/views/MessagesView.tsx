@@ -80,13 +80,23 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   }, [selectedNews?.id, selectedNews?.questions?.length]);
 
   // Lazy-load full message body / survey questions on Pronote 2026 (`tgra_DetailActu`)
+  const attemptedDetailIdsRef = React.useRef<Set<string>>(new Set());
+
   useEffect(() => {
     if (subTab !== 'news' || !selectedNews) return;
-    if (!selectedNews.needsDetail) {
+    const missingBody =
+      selectedNews.is === 'information'
+        ? !selectedNews.content?.trim()
+        : !(selectedNews.questions ?? []).some((q) => q.content?.trim() || q.choices.length > 0);
+    const shouldFetch =
+      (selectedNews.needsDetail || missingBody) && !attemptedDetailIdsRef.current.has(selectedNews.id);
+
+    if (!shouldFetch) {
       if (!selectedNews.read) onMarkNewsRead(selectedNews.id);
       return;
     }
 
+    attemptedDetailIdsRef.current.add(selectedNews.id);
     let cancelled = false;
     setLoadingNewsDetail(true);
     window.pronoteAPI.data
@@ -96,9 +106,13 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
         if (full) {
           onNewsDetailLoaded(full);
           if (!full.read) onMarkNewsRead(full.id);
+        } else {
+          attemptedDetailIdsRef.current.delete(selectedNews.id);
         }
       })
-      .catch(() => {})
+      .catch(() => {
+        attemptedDetailIdsRef.current.delete(selectedNews.id);
+      })
       .finally(() => {
         if (!cancelled) setLoadingNewsDetail(false);
       });
@@ -106,7 +120,14 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [subTab, selectedNews?.id, selectedNews?.needsDetail, onMarkNewsRead, onNewsDetailLoaded]);
+  }, [
+    subTab,
+    selectedNews?.id,
+    selectedNews?.needsDetail,
+    selectedNews?.content,
+    onMarkNewsRead,
+    onNewsDetailLoaded,
+  ]);
 
   useEffect(() => {
     if (subTab !== 'discussions' || !selectedDiscussion) return;
@@ -400,10 +421,16 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
                 {/* Information Body */}
                 {!loadingNewsDetail && selectedNews.is === 'information' && (
                   <>
-                    <div
-                      className="pronote-html"
-                      dangerouslySetInnerHTML={{ __html: sanitizeHtml(selectedNews.content) }}
-                    />
+                    {selectedNews.content?.trim() ? (
+                      <div
+                        className="pronote-html"
+                        dangerouslySetInnerHTML={{ __html: sanitizeHtml(selectedNews.content) }}
+                      />
+                    ) : selectedNews.attachments.length === 0 ? (
+                      <p className="text-xs text-zinc-500 italic">
+                        Aucun texte supplémentaire pour cette information.
+                      </p>
+                    ) : null}
 
                     {selectedNews.needToAcknowledge && (
                       <div className="pt-2">

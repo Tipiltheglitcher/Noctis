@@ -612,13 +612,38 @@ class MobilePronoteService {
   }
 
   public async loadSettings(): Promise<MobileSettings> {
+    const defaults: MobileSettings = {
+      accent: 'violet',
+      customAccentHex: '#8B74FF',
+      background: 'obsidian',
+      glowEnabled: true,
+      shape: 'rounded',
+      cardStyle: 'solid',
+      density: 'normal',
+      fontScale: 'md',
+      defaultTab: 'dashboard',
+      courseCardStyle: 'left',
+      showBreaks: true,
+      dashboardWidgets: {
+        showKpis: true,
+        showTimetable: true,
+        showHomework: true,
+      },
+    };
     const { value } = await Preferences.get({ key: SETTINGS_KEY });
-    if (!value) return { accent: 'violet' };
+    if (!value) return defaults;
     try {
       const parsed = JSON.parse(value) as Partial<MobileSettings>;
-      return { accent: parsed.accent ?? 'violet' };
+      return {
+        ...defaults,
+        ...parsed,
+        dashboardWidgets: {
+          ...defaults.dashboardWidgets!,
+          ...(parsed.dashboardWidgets ?? {}),
+        },
+      };
     } catch {
-      return { accent: 'violet' };
+      return defaults;
     }
   }
 
@@ -1081,12 +1106,27 @@ class MobilePronoteService {
           if (cached?.news?.length) return cached.news;
         }
 
-        // Preserve any already-fetched content from cache so offline reads still show full bodies
+        // Preserve any already-fetched non-empty content from cache
         const cached = await this.loadOfflineSnapshot();
         const merged = mapped.map((item) => {
           if (item.needsDetail && cached?.news) {
-            const prev = cached.news.find((c) => c.id === item.id && !c.needsDetail);
-            if (prev) return { ...item, content: prev.content, questions: prev.questions, attachments: prev.attachments };
+            const prev = cached.news.find((c) => {
+              if (c.id !== item.id || c.needsDetail) return false;
+              const hasInfoText = Boolean(c.content?.trim());
+              const hasSurveyBody = Boolean(
+                c.questions?.some((q) => Boolean(q.content?.trim()) || q.choices.length > 0)
+              );
+              return hasInfoText || hasSurveyBody || c.attachments.length > 0;
+            });
+            if (prev) {
+              return {
+                ...item,
+                content: prev.content,
+                questions: prev.questions,
+                attachments: prev.attachments,
+                needsDetail: false,
+              };
+            }
           }
           return item;
         });
@@ -1118,8 +1158,15 @@ class MobilePronoteService {
         const cached = await this.loadOfflineSnapshot();
         return cached?.news?.find((n) => n.id === id) ?? null;
       }
-      if (!item.__needsDetail || typeof item.__fetchDetail !== 'function') {
-        return this.mapNewsItem(item);
+      const mappedNow = this.mapNewsItem(item);
+      const alreadyHasBody =
+        mappedNow.is === 'information'
+          ? Boolean(mappedNow.content?.trim()) || mappedNow.attachments.length > 0
+          : Boolean(
+              mappedNow.questions?.some((q) => Boolean(q.content?.trim()) || q.choices.length > 0)
+            );
+      if ((!item.__needsDetail && alreadyHasBody) || typeof item.__fetchDetail !== 'function') {
+        return mappedNow;
       }
       try {
         const full = await item.__fetchDetail();

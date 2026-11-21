@@ -22,6 +22,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import type {
+  CourseCardStyle,
   HomeworkDTO,
   LessonDetailsDTO,
   TimetableItemDTO,
@@ -52,6 +53,9 @@ interface TimetableViewProps {
   selectedDate: Date;
   loading: boolean;
   autoAdvanceNote?: string | null;
+  defaultViewMode?: 'week' | 'day';
+  courseCardStyle?: CourseCardStyle;
+  showBreaks?: boolean;
   onChangeDate: (date: Date) => void;
   onToggleHomework: (id: string, done: boolean) => void;
 }
@@ -83,13 +87,16 @@ export const TimetableView: React.FC<TimetableViewProps> = ({
   selectedDate,
   loading,
   autoAdvanceNote,
+  defaultViewMode = 'week',
+  courseCardStyle = 'left',
+  showBreaks = true,
   onChangeDate,
   onToggleHomework,
 }) => {
   const [now, setNow] = useState(() => new Date());
   const [popover, setPopover] = useState<PopoverState | null>(null);
   const [viewMode, setViewMode] = useState<'week' | 'day'>(() =>
-    typeof window !== 'undefined' && window.innerWidth < 768 ? 'day' : 'week'
+    typeof window !== 'undefined' && window.innerWidth < 768 ? 'day' : defaultViewMode
   );
   const [lessonCache, setLessonCache] = useState<Record<string, LessonDetailsDTO | null>>({});
   const [loadingDetails, setLoadingDetails] = useState(false);
@@ -443,60 +450,76 @@ export const TimetableView: React.FC<TimetableViewProps> = ({
         </div>
       </div>
 
+      {/* Day Picker strip ONLY in Day mode (never confusingly selectable in Week mode!) */}
+      {viewMode === 'day' && (
+        <div className="grid grid-cols-5 gap-1.5 shrink-0">
+          {weekDays.map((d, idx) => {
+            const active = isSameDay(d, effectiveDate);
+            const isToday = isSameDay(d, now);
+            return (
+              <button
+                key={d.toISOString()}
+                type="button"
+                onClick={() => {
+                  setPopover(null);
+                  onChangeDate(d);
+                }}
+                className={`py-2 px-3 rounded-xl border flex items-center justify-center gap-2 text-xs transition-all ${
+                  active
+                    ? 'bg-accent text-black border-accent font-bold shadow-glow'
+                    : isToday
+                    ? 'bg-accent/10 border-accent/35 text-accent font-semibold'
+                    : 'bg-[#0E0E15] border-white/[0.06] text-zinc-400 hover:text-white'
+                }`}
+              >
+                <span>{DAY_NAMES[idx]}</span>
+                <span className="tabular-nums font-bold">{d.getDate()}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* Calendar Container */}
       <div className="flex-1 min-h-0 rounded-2xl bg-[#0B0B10] border border-white/[0.06] flex flex-col overflow-hidden">
-        {/* Day Headers (Mon - Fri) */}
+        {/* Day Headers (Mon - Fri — static non-clickable headers in Week view!) */}
         <div
           className="grid border-b border-white/[0.07] bg-[#0E0E15] shrink-0 pr-[7px]"
           style={{
             gridTemplateColumns: `64px repeat(${displayedDays.length}, minmax(0, 1fr))`,
           }}
         >
-          <div className="h-12 border-r border-white/[0.06] flex items-center justify-center text-[10px] font-semibold uppercase tracking-wider text-zinc-600">
+          <div className="h-12 border-r border-white/[0.06] flex items-center justify-center text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
             Heure
           </div>
           {displayedDays.map((day, i) => {
             const isToday = isSameDay(day, now);
-            const isSelectedDay = isSameDay(day, effectiveDate);
             const weekdayName =
               viewMode === 'week'
                 ? DAY_NAMES[i]
                 : day.toLocaleDateString('fr-FR', { weekday: 'long' });
             return (
-              <button
+              <div
                 key={day.toISOString()}
-                type="button"
-                onClick={() => {
-                  onChangeDate(day);
-                  if (viewMode === 'week') setPopover(null);
-                }}
-                className={`h-12 px-2 flex items-center justify-center gap-2 border-r last:border-r-0 border-white/[0.05] transition-colors ${
-                  isToday
-                    ? 'bg-accent/[0.11]'
-                    : isSelectedDay && viewMode === 'week'
-                    ? 'bg-white/[0.03]'
-                    : 'hover:bg-white/[0.02]'
+                className={`h-12 px-2 flex items-center justify-center gap-2 border-r last:border-r-0 border-white/[0.05] select-none ${
+                  isToday ? 'bg-accent/[0.1]' : ''
                 }`}
               >
                 <span
                   className={`text-xs font-semibold capitalize ${
-                    isToday ? 'text-accent' : isSelectedDay ? 'text-white' : 'text-zinc-400'
+                    isToday ? 'text-accent' : 'text-zinc-400'
                   }`}
                 >
                   {weekdayName}
                 </span>
                 <span
-                  className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold tabular-nums ${
-                    isToday
-                      ? 'bg-accent text-black shadow-glow'
-                      : isSelectedDay
-                      ? 'bg-white/[0.12] text-white'
-                      : 'text-zinc-300'
+                  className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold tabular-nums ${
+                    isToday ? 'bg-accent text-black font-bold shadow-glow' : 'text-zinc-200'
                   }`}
                 >
                   {day.getDate()}
                 </span>
-              </button>
+              </div>
             );
           })}
         </div>
@@ -515,23 +538,22 @@ export const TimetableView: React.FC<TimetableViewProps> = ({
               height: `${(endHour - startHour) * HOUR_HEIGHT + 28}px`,
             }}
           >
-            {/* Enhanced Time Ruler with crisp HHh00 + :30 ticks + live current time pill */}
+            {/* Clean Uniform Time Ruler (08:00, 09:00, ... with subtle 08:30 half-hour markers) */}
             <div className="relative border-r border-white/[0.06] bg-[#09090E] select-none">
               {hours.map((h) => (
                 <React.Fragment key={h}>
                   <div
-                    className="absolute right-2 text-[11px] font-semibold text-zinc-300 tabular-nums -translate-y-1/2 flex items-baseline"
+                    className="absolute right-2.5 text-[11px] font-medium text-zinc-400 tabular-nums -translate-y-1/2"
                     style={{ top: `${(h - startHour) * HOUR_HEIGHT + 14}px` }}
                   >
-                    <span>{String(h).padStart(2, '0')}h</span>
-                    <span className="text-[9.5px] font-normal text-zinc-500">00</span>
+                    {`${String(h).padStart(2, '0')}:00`}
                   </div>
                   {h < endHour && (
                     <div
-                      className="absolute right-2 text-[9.5px] text-zinc-600 tabular-nums -translate-y-1/2"
+                      className="absolute right-2.5 text-[10px] font-normal text-zinc-600 tabular-nums -translate-y-1/2"
                       style={{ top: `${(h - startHour + 0.5) * HOUR_HEIGHT + 14}px` }}
                     >
-                      :30
+                      {`${String(h).padStart(2, '0')}:30`}
                     </div>
                   )}
                 </React.Fragment>
@@ -539,10 +561,10 @@ export const TimetableView: React.FC<TimetableViewProps> = ({
 
               {todayVisibleInGrid && showNowLine && (
                 <div
-                  className="absolute right-1 z-30 -translate-y-1/2 px-1.5 py-0.5 rounded-md bg-accent text-black text-[10px] font-extrabold tabular-nums shadow-glow"
+                  className="absolute right-1 z-30 -translate-y-1/2 px-1.5 py-0.5 rounded-md bg-accent text-black text-[10px] font-bold tabular-nums shadow-glow"
                   style={{ top: `${(nowMinutesFromStart / 60) * HOUR_HEIGHT + 14}px` }}
                 >
-                  {`${String(now.getHours()).padStart(2, '0')}h${String(now.getMinutes()).padStart(
+                  {`${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(
                     2,
                     '0'
                   )}`}
@@ -583,7 +605,7 @@ export const TimetableView: React.FC<TimetableViewProps> = ({
                   ))}
 
                   {/* Lunch Break & Free Gaps (crystal clear visual separation!) */}
-                  {breaks.map((b) => {
+                  {showBreaks && breaks.map((b) => {
                     const sMin = (b.startDate.getHours() - startHour) * 60 + b.startDate.getMinutes();
                     const top = (sMin / 60) * HOUR_HEIGHT + 14 + 2;
                     const height = Math.max(26, (b.durationMinutes / 60) * HOUR_HEIGHT - 4);
@@ -684,10 +706,23 @@ export const TimetableView: React.FC<TimetableViewProps> = ({
                       left: `calc(${leftPct}% + 3px)`,
                       width: `calc(${widthPct}% - 6px)`,
                       borderLeftColor: leftBarColor,
+                      ...(courseCardStyle === 'border' && !item.canceled && !isPast
+                        ? {
+                            borderColor: hexToRgba(rawColor, 0.5),
+                            borderLeftColor: rawColor,
+                          }
+                        : {}),
+                      ...(courseCardStyle === 'tinted' && !item.canceled && !isPast
+                        ? {
+                            backgroundColor: hexToRgba(rawColor, 0.12),
+                            borderColor: hexToRgba(rawColor, 0.32),
+                            borderLeftColor: rawColor,
+                          }
+                        : {}),
                       ...(isCurrent
                         ? {
-                            backgroundColor: hexToRgba(rawColor, 0.17),
-                            borderColor: hexToRgba(rawColor, 0.65),
+                            backgroundColor: hexToRgba(rawColor, 0.2),
+                            borderColor: hexToRgba(rawColor, 0.7),
                             borderLeftColor: rawColor,
                             boxShadow: `0 0 22px -6px ${hexToRgba(rawColor, 0.65)}`,
                           }

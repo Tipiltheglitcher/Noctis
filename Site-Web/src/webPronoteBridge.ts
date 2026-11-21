@@ -70,6 +70,7 @@ import type {
   TimetableResponse,
 } from '@shared/types';
 import { getRelayUrl } from './config';
+import { DEFAULT_APP_SETTINGS } from '@/utils/theme';
 
 const DEMO_URL = 'https://demo.index-education.net/pronote';
 const SETTINGS_KEY = 'noctis_web_settings';
@@ -998,15 +999,35 @@ class WebPronoteBridge {
         getSettings: async () => {
           try {
             const raw = localStorage.getItem(SETTINGS_KEY);
-            if (raw) return { accent: 'violet', notificationsEnabled: false, refreshIntervalMinutes: 10, ...JSON.parse(raw) };
+            if (raw) {
+              const parsed = JSON.parse(raw) as Partial<AppSettings>;
+              return {
+                ...DEFAULT_APP_SETTINGS,
+                notificationsEnabled: false,
+                ...parsed,
+                dashboardWidgets: {
+                  ...DEFAULT_APP_SETTINGS.dashboardWidgets!,
+                  ...(parsed.dashboardWidgets ?? {}),
+                },
+              };
+            }
           } catch {
             // ignore
           }
-          return { accent: 'violet', notificationsEnabled: false, refreshIntervalMinutes: 10 };
+          return { ...DEFAULT_APP_SETTINGS, notificationsEnabled: false };
         },
         saveSettings: async (partial: Partial<AppSettings>) => {
           const cur = await window.pronoteAPI.system.getSettings();
-          const next = { ...cur, ...partial };
+          const next: AppSettings = {
+            ...cur,
+            ...partial,
+            dashboardWidgets: partial.dashboardWidgets
+              ? {
+                  ...(cur.dashboardWidgets ?? DEFAULT_APP_SETTINGS.dashboardWidgets!),
+                  ...partial.dashboardWidgets,
+                }
+              : cur.dashboardWidgets,
+          };
           try {
             localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
           } catch {

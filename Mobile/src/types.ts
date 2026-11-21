@@ -10,10 +10,41 @@ export type MobileTab =
   | 'menus'
   | 'settings';
 
-export type AccentTheme = 'violet' | 'emerald' | 'cyan' | 'mono';
+export type AccentTheme =
+  | 'violet'
+  | 'emerald'
+  | 'cyan'
+  | 'rose'
+  | 'amber'
+  | 'blue'
+  | 'indigo'
+  | 'mono'
+  | 'custom';
+
+export type BackgroundTheme = 'obsidian' | 'amoled' | 'midnight' | 'graphite' | 'aurora';
+export type ShapeStyle = 'sharp' | 'balanced' | 'rounded' | 'pill';
+export type CardStyle = 'solid' | 'glass' | 'outline';
+export type DensityStyle = 'compact' | 'normal' | 'spacious';
+export type FontScale = 'sm' | 'md' | 'lg';
+export type CourseCardStyle = 'left' | 'border' | 'tinted';
 
 export interface MobileSettings {
   accent: AccentTheme;
+  customAccentHex?: string;
+  background?: BackgroundTheme;
+  glowEnabled?: boolean;
+  shape?: ShapeStyle;
+  cardStyle?: CardStyle;
+  density?: DensityStyle;
+  fontScale?: FontScale;
+  defaultTab?: 'dashboard' | 'timetable' | 'homework' | 'grades';
+  courseCardStyle?: CourseCardStyle;
+  showBreaks?: boolean;
+  dashboardWidgets?: {
+    showKpis: boolean;
+    showTimetable: boolean;
+    showHomework: boolean;
+  };
 }
 
 export interface PeriodDTO {

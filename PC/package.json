@@ -1,7 +1,7 @@
 {
   "name": "noctis-desktop",
-  "version": "1.0.0",
-  "description": "Noctis — Application PC sombre et moderne pour votre espace scolaire (ENT Lycée Connecté & QR Code)",
+  "version": "1.1.0",
+  "description": "Noctis — Application PC sombre et moderne pour votre espace scolaire (Tous les ENT & QR Code)",
   "author": "Noctis",
   "main": "dist-electron/main.cjs",
   "scripts": {

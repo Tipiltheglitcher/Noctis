@@ -14,6 +14,26 @@ export interface SavedAuthData {
 
 const DEFAULT_SETTINGS: AppSettings = {
   accent: 'violet',
+  customAccentHex: '#8B74FF',
+  background: 'obsidian',
+  glowEnabled: true,
+  shape: 'rounded',
+  cardStyle: 'solid',
+  density: 'normal',
+  fontScale: 'md',
+  sidebarPosition: 'left',
+  sidebarCompact: false,
+  dashboardLayout: 'bento',
+  dashboardWidgets: {
+    showKpis: true,
+    showTimetable: true,
+    showHomework: true,
+    showGrades: true,
+    showNews: true,
+  },
+  defaultTimetableView: 'week',
+  courseCardStyle: 'left',
+  showBreaks: true,
   notificationsEnabled: true,
   refreshIntervalMinutes: 10,
 };
@@ -86,7 +106,14 @@ export function loadSettings(): AppSettings {
   if (!fs.existsSync(filePath)) return { ...DEFAULT_SETTINGS };
   try {
     const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8')) as Partial<AppSettings>;
-    return { ...DEFAULT_SETTINGS, ...parsed };
+    return {
+      ...DEFAULT_SETTINGS,
+      ...parsed,
+      dashboardWidgets: {
+        ...DEFAULT_SETTINGS.dashboardWidgets!,
+        ...(parsed.dashboardWidgets ?? {}),
+      },
+    };
   } catch {
     return { ...DEFAULT_SETTINGS };
   }
@@ -94,7 +121,15 @@ export function loadSettings(): AppSettings {
 
 export function saveSettings(partial: Partial<AppSettings>): AppSettings {
   const current = loadSettings();
-  const next: AppSettings = { ...current, ...partial };
+  const next: AppSettings = {
+    ...current,
+    ...partial,
+    dashboardWidgets: {
+      ...DEFAULT_SETTINGS.dashboardWidgets!,
+      ...(current.dashboardWidgets ?? {}),
+      ...(partial.dashboardWidgets ?? {}),
+    },
+  };
   fs.writeFileSync(getSettingsPath(), JSON.stringify(next, null, 2), 'utf8');
   return next;
 }

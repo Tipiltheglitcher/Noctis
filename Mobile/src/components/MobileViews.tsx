@@ -31,12 +31,24 @@ import {
   UtensilsCrossed,
   Coffee,
   MoonStar,
+  LayoutGrid,
+  Layers,
+  RotateCcw,
+  Sliders,
+  Type,
+  CalendarDays,
+  Eye,
+  Pipette,
 } from 'lucide-react';
 import type {
-  AccentTheme,
   AttendanceDTO,
+  BackgroundTheme,
+  CardStyle,
+  CourseCardStyle,
+  DensityStyle,
   DiscussionSummaryDTO,
   DiscussionThreadDTO,
+  FontScale,
   GradesOverviewDTO,
   HomeworkDTO,
   LessonDetailsDTO,
@@ -46,10 +58,16 @@ import type {
   MobileTab,
   NewsItemDTO,
   PeriodDTO,
+  ShapeStyle,
   StudentProfile,
   TimetableItemDTO,
   TimetableResponse,
 } from '@/types';
+import {
+  DEFAULT_MOBILE_SETTINGS,
+  MOBILE_ACCENT_PRESETS,
+  resolveMobileAccentHex,
+} from '@/utils/theme';
 import { mobilePronote } from '@/services/pronote';
 import { getAppVersion, openExternalUrl } from '@/services/updater';
 import {
@@ -131,6 +149,12 @@ export const MobileDashboard: React.FC<{
   grades: GradesOverviewDTO | null;
   news: NewsItemDTO[];
   messagingDisabled?: boolean;
+  widgets?: {
+    showKpis: boolean;
+    showTimetable: boolean;
+    showHomework: boolean;
+  };
+  showBreaks?: boolean;
   onNavigate: (tab: MobileTab) => void;
   onToggleHomework: (id: string, done: boolean) => void;
 }> = ({
@@ -140,9 +164,14 @@ export const MobileDashboard: React.FC<{
   grades,
   news,
   messagingDisabled = false,
+  widgets,
+  showBreaks = true,
   onNavigate,
   onToggleHomework,
 }) => {
+  const showKpis = widgets?.showKpis !== false;
+  const showTimetable = widgets?.showTimetable !== false;
+  const showHomework = widgets?.showHomework !== false;
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 30_000);
@@ -199,7 +228,7 @@ export const MobileDashboard: React.FC<{
   }, [timetableItems, now]);
 
   const displayTimeline = useMemo(() => {
-    const breaks = computeDayBreaks(displayDay.items);
+    const breaks = showBreaks ? computeDayBreaks(displayDay.items) : [];
     type Row =
       | { kind: 'lesson'; sortKey: number; item: TimetableItemDTO }
       | { kind: 'break'; sortKey: number; brk: (typeof breaks)[number] };
@@ -216,7 +245,7 @@ export const MobileDashboard: React.FC<{
       })),
     ];
     return rows.sort((a, b) => a.sortKey - b.sortKey);
-  }, [displayDay.items]);
+  }, [displayDay.items, showBreaks]);
 
   const nextLesson = useMemo(() => {
     const active = timetableItems.filter((c) => !c.canceled);
@@ -311,6 +340,7 @@ export const MobileDashboard: React.FC<{
       )}
 
       {/* KPI Row */}
+      {showKpis && (
       <div className="grid grid-cols-3 gap-2.5">
         <button
           onClick={() => onNavigate('grades')}
@@ -346,8 +376,10 @@ export const MobileDashboard: React.FC<{
           </div>
         </button>
       </div>
+      )}
 
       {/* Smart Day Classes (auto-advances to tomorrow / Monday once today ends!) */}
+      {showTimetable && (
       <section className="rounded-2xl bg-[#0D0D13] border border-white/[0.06] p-4 space-y-2">
         <div className="flex items-center justify-between gap-2">
           <div>
@@ -450,8 +482,10 @@ export const MobileDashboard: React.FC<{
           })
         )}
       </section>
+      )}
 
       {/* Homework */}
+      {showHomework && (
       <section className="rounded-2xl bg-[#0D0D13] border border-white/[0.06] p-4 space-y-2.5">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-bold text-white">Devoirs à faire</h2>
@@ -485,6 +519,7 @@ export const MobileDashboard: React.FC<{
           ))
         )}
       </section>
+      )}
     </div>
   );
 };
@@ -496,6 +531,8 @@ export const MobileTimetable: React.FC<{
   selectedDate: Date;
   loading: boolean;
   autoAdvanceNote?: string | null;
+  courseCardStyle?: CourseCardStyle;
+  showBreaks?: boolean;
   onChangeDate: (d: Date) => void;
   onToggleHomework: (id: string, done: boolean) => void;
 }> = ({
@@ -504,6 +541,8 @@ export const MobileTimetable: React.FC<{
   selectedDate,
   loading,
   autoAdvanceNote,
+  courseCardStyle = 'left',
+  showBreaks = true,
   onChangeDate,
   onToggleHomework,
 }) => {
@@ -544,7 +583,7 @@ export const MobileTimetable: React.FC<{
   );
 
   const timelineRows = useMemo(() => {
-    const breaks = computeDayBreaks(dayItems);
+    const breaks = showBreaks ? computeDayBreaks(dayItems) : [];
     type Row =
       | { kind: 'lesson'; sortKey: number; item: TimetableItemDTO }
       | { kind: 'break'; sortKey: number; brk: (typeof breaks)[number] };
@@ -561,7 +600,7 @@ export const MobileTimetable: React.FC<{
       })),
     ];
     return rows.sort((a, b) => a.sortKey - b.sortKey);
-  }, [dayItems]);
+  }, [dayItems, showBreaks]);
 
   useEffect(() => {
     const resId = selectedItem?.lessonResourceID;
@@ -756,20 +795,28 @@ export const MobileTimetable: React.FC<{
               )
             );
             const barColor = item.canceled ? '#f43f5e' : isPast ? '#52525b' : rawColor;
+            const customCardStyle: React.CSSProperties | undefined = isCurrent
+              ? {
+                  backgroundColor: hexToRgba(rawColor, 0.16),
+                  borderColor: hexToRgba(rawColor, 0.6),
+                  boxShadow: `0 0 22px -8px ${hexToRgba(rawColor, 0.7)}`,
+                }
+              : !item.canceled && !isPast && courseCardStyle === 'border'
+              ? {
+                  borderColor: hexToRgba(rawColor, 0.5),
+                }
+              : !item.canceled && !isPast && courseCardStyle === 'tinted'
+              ? {
+                  backgroundColor: hexToRgba(rawColor, 0.12),
+                  borderColor: hexToRgba(rawColor, 0.35),
+                }
+              : undefined;
 
             return (
               <button
                 key={item.id}
                 onClick={() => setSelectedItem(item)}
-                style={
-                  isCurrent
-                    ? {
-                        backgroundColor: hexToRgba(rawColor, 0.16),
-                        borderColor: hexToRgba(rawColor, 0.6),
-                        boxShadow: `0 0 22px -8px ${hexToRgba(rawColor, 0.7)}`,
-                      }
-                    : undefined
-                }
+                style={customCardStyle}
                 className={`w-full p-3.5 rounded-2xl border text-left flex items-stretch gap-3 active:scale-[0.99] transition-all ${
                   item.canceled
                     ? 'bg-rose-500/[0.05] border-rose-500/20 opacity-75'
@@ -783,7 +830,7 @@ export const MobileTimetable: React.FC<{
                 {/* Crisp Start -> End Time Gutter */}
                 <div className="w-12 flex flex-col justify-between items-end shrink-0 tabular-nums py-0.5">
                   <div
-                    className={`text-xs font-extrabold leading-none ${
+                    className={`text-xs font-semibold leading-none ${
                       isCurrent ? 'text-white' : isPast ? 'text-zinc-500' : 'text-zinc-100'
                     }`}
                   >
@@ -793,7 +840,7 @@ export const MobileTimetable: React.FC<{
                     {formatDurationMinutes(durationMins)}
                   </div>
                   <div
-                    className={`text-[11px] font-semibold leading-none ${
+                    className={`text-[11px] font-medium leading-none ${
                       isPast ? 'text-zinc-600' : 'text-zinc-400'
                     }`}
                   >
@@ -802,10 +849,17 @@ export const MobileTimetable: React.FC<{
                 </div>
 
                 {/* Subject Color Strip */}
-                <div
-                  className="w-1.5 rounded-full shrink-0"
-                  style={{ backgroundColor: barColor }}
-                />
+                {courseCardStyle === 'left' || isCurrent || item.canceled ? (
+                  <div
+                    className="w-1.5 rounded-full shrink-0"
+                    style={{ backgroundColor: barColor }}
+                  />
+                ) : (
+                  <div
+                    className="w-1 rounded-full shrink-0 opacity-75"
+                    style={{ backgroundColor: barColor }}
+                  />
+                )}
 
                 {/* Course Content */}
                 <div className="min-w-0 flex-1 flex flex-col justify-between gap-1">
@@ -1491,7 +1545,11 @@ export const MobileMessages: React.FC<{
                 onClick={async () => {
                   setOpenNews(item);
                   let active = item;
-                  if (item.needsDetail) {
+                  const missingBody =
+                    item.is === 'information'
+                      ? !item.content?.trim()
+                      : !(item.questions ?? []).some((q) => q.content?.trim() || q.choices.length > 0);
+                  if (item.needsDetail || missingBody) {
                     setLoadingNewsDetail(true);
                     try {
                       const full = await mobilePronote.getNewsDetail(item.id);
@@ -1579,10 +1637,16 @@ export const MobileMessages: React.FC<{
               </div>
             ) : openNews.is === 'information' ? (
               <>
-                <div
-                  className="pronote-html"
-                  dangerouslySetInnerHTML={{ __html: sanitizeHtml(openNews.content) }}
-                />
+                {openNews.content?.trim() ? (
+                  <div
+                    className="pronote-html"
+                    dangerouslySetInnerHTML={{ __html: sanitizeHtml(openNews.content) }}
+                  />
+                ) : openNews.attachments.length === 0 ? (
+                  <p className="text-xs text-zinc-500 italic">
+                    Aucun texte supplémentaire pour cette information.
+                  </p>
+                ) : null}
                 {openNews.needToAcknowledge && !openNews.acknowledged && (
                   <button
                     onClick={async () => {
@@ -1835,49 +1899,410 @@ export const MobileMenus: React.FC<{
   );
 };
 
-/* ================= SETTINGS ================= */
+/* ================= SETTINGS (STUDIO DE PERSONNALISATION) ================= */
 export const MobileSettingsView: React.FC<{
   profile: StudentProfile;
   settings: MobileSettings;
   checkingUpdate: boolean;
   updateMsg: string | null;
-  onUpdateSettings: (next: MobileSettings) => void;
+  onUpdateSettings: (partial: Partial<MobileSettings>) => void;
   onCheckUpdate: () => void;
   onLogout: () => void;
 }> = ({ profile, settings, checkingUpdate, updateMsg, onUpdateSettings, onCheckUpdate, onLogout }) => {
-  const accents: Array<{ id: AccentTheme; label: string; hex: string }> = [
-    { id: 'violet', label: 'Violet', hex: '#8B74FF' },
-    { id: 'emerald', label: 'Émeraude', hex: '#10B981' },
-    { id: 'cyan', label: 'Cyan', hex: '#22D3EE' },
-    { id: 'mono', label: 'Blanc', hex: '#F4F4F5' },
+  const activeHex = resolveMobileAccentHex(settings);
+  const [hexInput, setHexInput] = useState(settings.customAccentHex || activeHex);
+
+  useEffect(() => {
+    setHexInput(settings.customAccentHex || activeHex);
+  }, [settings.customAccentHex, activeHex]);
+
+  const backgrounds: Array<{ id: BackgroundTheme; label: string; swatch: string }> = [
+    { id: 'obsidian', label: 'Obsidian', swatch: '#07070A' },
+    { id: 'amoled', label: 'AMOLED', swatch: '#000000' },
+    { id: 'midnight', label: 'Minuit', swatch: '#060A16' },
+    { id: 'graphite', label: 'Graphite', swatch: '#14151B' },
+    { id: 'aurora', label: 'Aurore', swatch: '#0B0714' },
   ];
 
-  return (
-    <div className="p-4 space-y-4">
-      <h1 className="text-lg font-bold text-white">Paramètres</h1>
+  const shapes: Array<{ id: ShapeStyle; label: string; previewClass: string }> = [
+    { id: 'sharp', label: 'Carré', previewClass: 'rounded-[3px]' },
+    { id: 'balanced', label: 'Équilibré', previewClass: 'rounded-lg' },
+    { id: 'rounded', label: 'Arrondi', previewClass: 'rounded-2xl' },
+    { id: 'pill', label: 'Bulle', previewClass: 'rounded-full' },
+  ];
 
-      <div className="p-4 rounded-2xl bg-[#0D0D14] border border-white/[0.06] space-y-3">
-        <div className="flex items-center gap-2 text-xs font-semibold text-white">
-          <Palette className="w-4 h-4 text-accent" /> Couleur d'accentuation
+  const cardStyles: Array<{ id: CardStyle; label: string; desc: string }> = [
+    { id: 'solid', label: 'Mat', desc: 'Obsidian net' },
+    { id: 'glass', label: 'Verre', desc: 'Translucide' },
+    { id: 'outline', label: 'Néon', desc: 'Contour fin' },
+  ];
+
+  const densities: Array<{ id: DensityStyle; label: string }> = [
+    { id: 'compact', label: 'Compact' },
+    { id: 'normal', label: 'Normal' },
+    { id: 'spacious', label: 'Aéré' },
+  ];
+
+  const fontScales: Array<{ id: FontScale; label: string }> = [
+    { id: 'sm', label: 'Petit' },
+    { id: 'md', label: 'Normal' },
+    { id: 'lg', label: 'Grand' },
+  ];
+
+  const startupTabs: Array<{ id: NonNullable<MobileSettings['defaultTab']>; label: string }> = [
+    { id: 'dashboard', label: 'Accueil' },
+    { id: 'timetable', label: 'Cours' },
+    { id: 'homework', label: 'Devoirs' },
+    { id: 'grades', label: 'Notes' },
+  ];
+
+  const courseStyles: Array<{ id: CourseCardStyle; label: string }> = [
+    { id: 'left', label: 'Barre' },
+    { id: 'border', label: 'Contour' },
+    { id: 'tinted', label: 'Teinté' },
+  ];
+
+  const widgets = settings.dashboardWidgets ?? DEFAULT_MOBILE_SETTINGS.dashboardWidgets!;
+
+  const commitHex = (raw: string) => {
+    setHexInput(raw);
+    const cleaned = raw.trim();
+    if (/^#[0-9a-fA-F]{6}$/.test(cleaned)) {
+      onUpdateSettings({ accent: 'custom', customAccentHex: cleaned.toUpperCase() });
+    }
+  };
+
+  return (
+    <div className="p-4 space-y-4 pb-8">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <h1 className="text-lg font-bold text-white">Personnalisation</h1>
+          <p className="text-[11px] text-zinc-400">Couleurs, formes et disposition sur mesure</p>
         </div>
-        <div className="grid grid-cols-4 gap-2">
-          {accents.map((a) => (
-            <button
-              key={a.id}
-              onClick={() => onUpdateSettings({ accent: a.id })}
-              className={`p-2.5 rounded-xl border text-center ${
-                settings.accent === a.id
-                  ? 'border-accent bg-white/[0.06]'
-                  : 'border-white/[0.06] bg-[#12121A]'
-              }`}
-            >
-              <span className="block w-5 h-5 rounded-full mx-auto mb-1" style={{ backgroundColor: a.hex }} />
-              <span className="text-[10.5px] text-zinc-200">{a.label}</span>
-            </button>
-          ))}
+        <button
+          onClick={() => onUpdateSettings({ ...DEFAULT_MOBILE_SETTINGS })}
+          className="px-2.5 py-1.5 rounded-xl bg-white/[0.05] border border-white/[0.08] text-[11px] text-zinc-300 font-medium inline-flex items-center gap-1.5 shrink-0"
+        >
+          <RotateCcw className="w-3.5 h-3.5" />
+          Réinitialiser
+        </button>
+      </div>
+
+      {/* Live Preview Card */}
+      <div className="p-4 rounded-2xl bg-[#0D0D14] border border-white/[0.08] space-y-2.5 relative overflow-hidden">
+        <div className="flex items-center justify-between">
+          <span className="text-[10.5px] font-semibold uppercase tracking-wider text-accent inline-flex items-center gap-1">
+            <Eye className="w-3.5 h-3.5" /> Aperçu en direct
+          </span>
+          <span className="px-2 py-0.5 rounded-full bg-accent text-black text-[10px] font-bold">
+            Noctis v{getAppVersion()}
+          </span>
+        </div>
+        <div className="p-3 rounded-xl bg-[#13131D] border border-white/[0.07] flex items-center gap-3">
+          <div className="w-1.5 h-9 rounded-full shrink-0 bg-accent" />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-bold text-white truncate">Mathématiques</span>
+              <span className="px-1.5 py-0.5 rounded-full bg-accent/20 text-accent text-[9.5px] font-bold">
+                EN COURS
+              </span>
+            </div>
+            <div className="text-[11px] text-zinc-400 mt-0.5">08:00 – 10:00 · Salle E 001</div>
+          </div>
         </div>
       </div>
 
+      {/* Accent Colors + Custom Picker */}
+      <div className="p-4 rounded-2xl bg-[#0D0D14] border border-white/[0.06] space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-xs font-semibold text-white">
+            <Palette className="w-4 h-4 text-accent" /> Couleur d'accentuation
+          </div>
+          <span className="text-[11px] font-mono text-zinc-400">{activeHex.toUpperCase()}</span>
+        </div>
+        <div className="grid grid-cols-4 gap-2">
+          {MOBILE_ACCENT_PRESETS.map((a) => (
+            <button
+              key={a.id}
+              onClick={() => onUpdateSettings({ accent: a.id, customAccentHex: a.hex })}
+              className={`p-2 rounded-xl border text-center transition-all ${
+                settings.accent === a.id
+                  ? 'border-accent bg-accent/10'
+                  : 'border-white/[0.06] bg-[#12121A]'
+              }`}
+            >
+              <span
+                className="block w-5 h-5 rounded-full mx-auto mb-1 border border-white/20"
+                style={{ backgroundColor: a.hex }}
+              />
+              <span className="text-[10px] text-zinc-200 block truncate">{a.label}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* Custom Unlimited Color Picker */}
+        <div className="pt-2 border-t border-white/[0.06] flex items-center gap-2.5">
+          <label className="relative w-10 h-10 rounded-xl overflow-hidden border border-white/15 shrink-0 cursor-pointer flex items-center justify-center">
+            <input
+              type="color"
+              value={/^#[0-9a-fA-F]{6}$/.test(activeHex) ? activeHex : '#8B74FF'}
+              onChange={(e) => commitHex(e.target.value)}
+              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+            />
+            <span className="w-full h-full block" style={{ backgroundColor: activeHex }} />
+            <Pipette className="w-4 h-4 text-black/80 absolute pointer-events-none drop-shadow" />
+          </label>
+          <div className="flex-1 min-w-0">
+            <div className="text-[11px] font-semibold text-white">Couleur personnalisée</div>
+            <div className="text-[10px] text-zinc-500">Palette libre ou code HEX</div>
+          </div>
+          <input
+            type="text"
+            value={hexInput}
+            onChange={(e) => commitHex(e.target.value)}
+            maxLength={7}
+            placeholder="#8B74FF"
+            className="w-24 px-2.5 py-1.5 rounded-xl bg-[#09090F] border border-white/[0.1] text-xs font-mono text-white text-center uppercase"
+          />
+        </div>
+      </div>
+
+      {/* Background Theme + Ambient Glow */}
+      <div className="p-4 rounded-2xl bg-[#0D0D14] border border-white/[0.06] space-y-3">
+        <div className="flex items-center gap-2 text-xs font-semibold text-white">
+          <Layers className="w-4 h-4 text-accent" /> Fond & Ambiance
+        </div>
+        <div className="grid grid-cols-5 gap-1.5">
+          {backgrounds.map((bg) => {
+            const active = (settings.background || 'obsidian') === bg.id;
+            return (
+              <button
+                key={bg.id}
+                onClick={() => onUpdateSettings({ background: bg.id })}
+                className={`p-2 rounded-xl border text-center ${
+                  active ? 'border-accent bg-accent/10' : 'border-white/[0.06] bg-[#12121A]'
+                }`}
+              >
+                <span
+                  className="block w-6 h-6 rounded-lg mx-auto mb-1 border border-white/15"
+                  style={{ backgroundColor: bg.swatch }}
+                />
+                <span className="text-[9.5px] text-zinc-200 block truncate">{bg.label}</span>
+              </button>
+            );
+          })}
+        </div>
+        <button
+          onClick={() => onUpdateSettings({ glowEnabled: settings.glowEnabled === false })}
+          className="w-full pt-2 border-t border-white/[0.06] flex items-center justify-between text-left"
+        >
+          <div>
+            <div className="text-xs font-medium text-white">Halo lumineux d'ambiance</div>
+            <div className="text-[10.5px] text-zinc-500">Reflet discret de ta couleur en haut</div>
+          </div>
+          <span
+            className={`w-10 h-6 rounded-full p-0.5 transition-colors flex items-center ${
+              settings.glowEnabled !== false ? 'bg-accent justify-end' : 'bg-zinc-700 justify-start'
+            }`}
+          >
+            <span className="w-5 h-5 rounded-full bg-white shadow" />
+          </span>
+        </button>
+      </div>
+
+      {/* Shapes & Card Surface */}
+      <div className="p-4 rounded-2xl bg-[#0D0D14] border border-white/[0.06] space-y-3.5">
+        <div className="flex items-center gap-2 text-xs font-semibold text-white">
+          <Sliders className="w-4 h-4 text-accent" /> Formes & Style des cartes
+        </div>
+        <div className="grid grid-cols-4 gap-2">
+          {shapes.map((sh) => {
+            const active = (settings.shape || 'rounded') === sh.id;
+            return (
+              <button
+                key={sh.id}
+                onClick={() => onUpdateSettings({ shape: sh.id })}
+                className={`p-2.5 rounded-xl border text-center ${
+                  active ? 'border-accent bg-accent/10' : 'border-white/[0.06] bg-[#12121A]'
+                }`}
+              >
+                <span
+                  className={`block w-8 h-5 mx-auto mb-1.5 border-2 ${sh.previewClass} ${
+                    active ? 'border-accent bg-accent/25' : 'border-zinc-500 bg-white/[0.04]'
+                  }`}
+                />
+                <span className="text-[10px] text-zinc-200">{sh.label}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="grid grid-cols-3 gap-2">
+          {cardStyles.map((cs) => {
+            const active = (settings.cardStyle || 'solid') === cs.id;
+            return (
+              <button
+                key={cs.id}
+                onClick={() => onUpdateSettings({ cardStyle: cs.id })}
+                className={`p-2.5 rounded-xl border text-left ${
+                  active ? 'border-accent bg-accent/10' : 'border-white/[0.06] bg-[#12121A]'
+                }`}
+              >
+                <div className="text-xs font-semibold text-white">{cs.label}</div>
+                <div className="text-[10px] text-zinc-400">{cs.desc}</div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Density & Typography */}
+      <div className="p-4 rounded-2xl bg-[#0D0D14] border border-white/[0.06] space-y-3">
+        <div className="flex items-center gap-2 text-xs font-semibold text-white">
+          <Type className="w-4 h-4 text-accent" /> Densité & Taille du texte
+        </div>
+        <div className="space-y-2">
+          <div className="text-[10.5px] text-zinc-400">Espacement</div>
+          <div className="grid grid-cols-3 gap-1.5">
+            {densities.map((d) => (
+              <button
+                key={d.id}
+                onClick={() => onUpdateSettings({ density: d.id })}
+                className={`py-2 rounded-xl border text-xs font-semibold ${
+                  (settings.density || 'normal') === d.id
+                    ? 'bg-accent text-black border-accent'
+                    : 'bg-[#12121A] border-white/[0.06] text-zinc-300'
+                }`}
+              >
+                {d.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="space-y-2">
+          <div className="text-[10.5px] text-zinc-400">Taille du texte</div>
+          <div className="grid grid-cols-3 gap-1.5">
+            {fontScales.map((fs) => (
+              <button
+                key={fs.id}
+                onClick={() => onUpdateSettings({ fontScale: fs.id })}
+                className={`py-2 rounded-xl border text-xs font-semibold ${
+                  (settings.fontScale || 'md') === fs.id
+                    ? 'bg-accent text-black border-accent'
+                    : 'bg-[#12121A] border-white/[0.06] text-zinc-300'
+                }`}
+              >
+                {fs.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Layout, Startup Tab & Timetable Customization */}
+      <div className="p-4 rounded-2xl bg-[#0D0D14] border border-white/[0.06] space-y-3.5">
+        <div className="flex items-center gap-2 text-xs font-semibold text-white">
+          <LayoutGrid className="w-4 h-4 text-accent" /> Disposition & Accueil
+        </div>
+
+        <div className="space-y-2">
+          <div className="text-[10.5px] text-zinc-400">Onglet au démarrage</div>
+          <div className="grid grid-cols-4 gap-1.5">
+            {startupTabs.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => onUpdateSettings({ defaultTab: t.id })}
+                className={`py-2 rounded-xl border text-[11px] font-semibold ${
+                  (settings.defaultTab || 'dashboard') === t.id
+                    ? 'bg-accent text-black border-accent'
+                    : 'bg-[#12121A] border-white/[0.06] text-zinc-300'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-2 pt-1 border-t border-white/[0.06]">
+          <div className="text-[10.5px] text-zinc-400">Blocs affichés sur l'accueil</div>
+          {(
+            [
+              { key: 'showKpis', label: 'Indicateurs (Moyenne / Devoirs / Infos)' },
+              { key: 'showTimetable', label: 'Cours du jour / lendemain' },
+              { key: 'showHomework', label: 'Devoirs à faire' },
+            ] as const
+          ).map((w) => {
+            const on = widgets[w.key] !== false;
+            return (
+              <button
+                key={w.key}
+                onClick={() =>
+                  onUpdateSettings({
+                    dashboardWidgets: {
+                      ...widgets,
+                      [w.key]: !on,
+                    },
+                  })
+                }
+                className="w-full py-1.5 flex items-center justify-between text-left"
+              >
+                <span className="text-xs text-zinc-200">{w.label}</span>
+                <span
+                  className={`w-9 h-5 rounded-full p-0.5 transition-colors flex items-center ${
+                    on ? 'bg-accent justify-end' : 'bg-zinc-700 justify-start'
+                  }`}
+                >
+                  <span className="w-4 h-4 rounded-full bg-white shadow" />
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Timetable Card Style & Breaks */}
+      <div className="p-4 rounded-2xl bg-[#0D0D14] border border-white/[0.06] space-y-3">
+        <div className="flex items-center gap-2 text-xs font-semibold text-white">
+          <CalendarDays className="w-4 h-4 text-accent" /> Emploi du temps
+        </div>
+        <div className="space-y-2">
+          <div className="text-[10.5px] text-zinc-400">Style des cartes de cours</div>
+          <div className="grid grid-cols-3 gap-1.5">
+            {courseStyles.map((cs) => (
+              <button
+                key={cs.id}
+                onClick={() => onUpdateSettings({ courseCardStyle: cs.id })}
+                className={`py-2 rounded-xl border text-xs font-semibold ${
+                  (settings.courseCardStyle || 'left') === cs.id
+                    ? 'bg-accent text-black border-accent'
+                    : 'bg-[#12121A] border-white/[0.06] text-zinc-300'
+                }`}
+              >
+                {cs.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <button
+          onClick={() => onUpdateSettings({ showBreaks: settings.showBreaks === false })}
+          className="w-full pt-2 border-t border-white/[0.06] flex items-center justify-between text-left"
+        >
+          <div>
+            <div className="text-xs font-medium text-white">Afficher les pauses</div>
+            <div className="text-[10.5px] text-zinc-500">Pause déjeuner & créneaux libres</div>
+          </div>
+          <span
+            className={`w-10 h-6 rounded-full p-0.5 transition-colors flex items-center ${
+              settings.showBreaks !== false ? 'bg-accent justify-end' : 'bg-zinc-700 justify-start'
+            }`}
+          >
+            <span className="w-5 h-5 rounded-full bg-white shadow" />
+          </span>
+        </button>
+      </div>
+
+      {/* App Version & Updater */}
       <div className="p-4 rounded-2xl bg-[#0D0D14] border border-white/[0.06] space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 text-xs font-semibold text-white">
@@ -1895,6 +2320,7 @@ export const MobileSettingsView: React.FC<{
         {updateMsg && <div className="text-xs text-emerald-300">{updateMsg}</div>}
       </div>
 
+      {/* Account */}
       <div className="p-4 rounded-2xl bg-[#0D0D14] border border-white/[0.06] space-y-3">
         <div className="text-xs text-white font-semibold">{profile.name} · {profile.className}</div>
         <div className="text-[11px] text-zinc-400">{profile.establishmentName}</div>

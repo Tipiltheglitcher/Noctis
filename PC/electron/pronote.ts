@@ -1119,13 +1119,21 @@ class PronoteService {
         const cached = this.getOfflineSnapshot();
         const merged = mapped.map((item) => {
           if (item.needsDetail && cached?.news) {
-            const prev = cached.news.find((c) => c.id === item.id && !c.needsDetail);
+            const prev = cached.news.find((c) => {
+              if (c.id !== item.id || c.needsDetail) return false;
+              const hasInfoText = Boolean(c.content?.trim());
+              const hasSurveyBody = Boolean(
+                c.questions?.some((q) => Boolean(q.content?.trim()) || q.choices.length > 0)
+              );
+              return hasInfoText || hasSurveyBody || c.attachments.length > 0;
+            });
             if (prev) {
               return {
                 ...item,
                 content: prev.content,
                 questions: prev.questions,
                 attachments: prev.attachments,
+                needsDetail: false,
               };
             }
           }
@@ -1157,8 +1165,15 @@ class PronoteService {
       if (!item) {
         return this.getOfflineSnapshot()?.news?.find((n) => n.id === newsId) ?? null;
       }
-      if (!item.__needsDetail || typeof item.__fetchDetail !== 'function') {
-        return this.mapNewsItem(item);
+      const mappedNow = this.mapNewsItem(item);
+      const alreadyHasBody =
+        mappedNow.is === 'information'
+          ? Boolean(mappedNow.content?.trim()) || mappedNow.attachments.length > 0
+          : Boolean(
+              mappedNow.questions?.some((q) => Boolean(q.content?.trim()) || q.choices.length > 0)
+            );
+      if ((!item.__needsDetail && alreadyHasBody) || typeof item.__fetchDetail !== 'function') {
+        return mappedNow;
       }
       try {
         const full = await item.__fetchDetail();

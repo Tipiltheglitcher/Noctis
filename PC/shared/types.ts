@@ -8,10 +8,50 @@ export type NavTab =
   | 'menus'
   | 'settings';
 
-export type AccentTheme = 'violet' | 'emerald' | 'cyan' | 'mono';
+export type AccentTheme =
+  | 'violet'
+  | 'emerald'
+  | 'cyan'
+  | 'rose'
+  | 'amber'
+  | 'blue'
+  | 'indigo'
+  | 'mono'
+  | 'custom';
+
+export type BackgroundTheme = 'obsidian' | 'amoled' | 'midnight' | 'graphite' | 'aurora';
+export type ShapeStyle = 'sharp' | 'balanced' | 'rounded' | 'pill';
+export type CardStyle = 'solid' | 'glass' | 'outline';
+export type DensityStyle = 'compact' | 'normal' | 'spacious';
+export type FontScale = 'sm' | 'md' | 'lg';
+export type CourseCardStyle = 'left' | 'border' | 'tinted';
+export type SidebarPosition = 'left' | 'right';
+export type DashboardLayout = 'bento' | 'stacked';
+
+export interface DashboardWidgetsConfig {
+  showKpis: boolean;
+  showTimetable: boolean;
+  showHomework: boolean;
+  showGrades: boolean;
+  showNews: boolean;
+}
 
 export interface AppSettings {
   accent: AccentTheme;
+  customAccentHex?: string;
+  background?: BackgroundTheme;
+  glowEnabled?: boolean;
+  shape?: ShapeStyle;
+  cardStyle?: CardStyle;
+  density?: DensityStyle;
+  fontScale?: FontScale;
+  sidebarPosition?: SidebarPosition;
+  sidebarCompact?: boolean;
+  dashboardLayout?: DashboardLayout;
+  dashboardWidgets?: DashboardWidgetsConfig;
+  defaultTimetableView?: 'week' | 'day';
+  courseCardStyle?: CourseCardStyle;
+  showBreaks?: boolean;
   notificationsEnabled: boolean;
   refreshIntervalMinutes: number;
 }

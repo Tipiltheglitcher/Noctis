@@ -21,6 +21,7 @@ import {
   getWeekKey,
   isWeekend,
 } from '@/utils/schoolTime';
+import { applyThemeToDocument, DEFAULT_APP_SETTINGS } from '@/utils/theme';
 import { TitleBar } from './components/TitleBar';
 import { Sidebar } from './components/Sidebar';
 import { LoginView } from './components/LoginView';
@@ -34,11 +35,7 @@ import { MessagesView } from './views/MessagesView';
 import { MenusView } from './views/MenusView';
 import { SettingsView } from './views/SettingsView';
 
-const DEFAULT_SETTINGS: AppSettings = {
-  accent: 'violet',
-  notificationsEnabled: true,
-  refreshIntervalMinutes: 10,
-};
+const DEFAULT_SETTINGS: AppSettings = DEFAULT_APP_SETTINGS;
 
 export default function App() {
   const [booting, setBooting] = useState(true);
@@ -93,8 +90,8 @@ export default function App() {
   const cachedSnapRef = useRef<OfflineCacheSnapshot | null>(null);
 
   useEffect(() => {
-    document.documentElement.setAttribute('data-accent', settings.accent);
-  }, [settings.accent]);
+    applyThemeToDocument(settings);
+  }, [settings]);
 
   const hydrateFromSnapshot = useCallback((snap: OfflineCacheSnapshot, targetDate: Date) => {
     cachedSnapRef.current = snap;
@@ -636,13 +633,19 @@ export default function App() {
       ) : !profile ? (
         <LoginView onAuthenticated={handleAuthenticated} />
       ) : (
-        <div className="flex-1 min-h-0 flex overflow-hidden">
+        <div
+          className={`flex-1 min-h-0 flex overflow-hidden ${
+            settings.sidebarPosition === 'right' ? 'flex-row-reverse' : 'flex-row'
+          }`}
+        >
           <Sidebar
             activeTab={activeTab}
             onSelectTab={setActiveTab}
             profile={profile}
             undoneHomeworkCount={undoneHomeworkCount}
             unreadMessagesCount={unreadMessagesCount}
+            compact={Boolean(settings.sidebarCompact)}
+            position={settings.sidebarPosition || 'left'}
             onLogout={handleLogout}
           />
 
@@ -656,6 +659,9 @@ export default function App() {
                 news={news}
                 loading={refreshing}
                 messagingDisabled={messagingDisabled}
+                layout={settings.dashboardLayout || 'bento'}
+                widgets={settings.dashboardWidgets}
+                showBreaks={settings.showBreaks !== false}
                 onNavigate={setActiveTab}
                 onToggleHomework={handleToggleHomework}
               />
@@ -668,6 +674,9 @@ export default function App() {
                 selectedDate={timetableDate}
                 loading={loadingTimetable}
                 autoAdvanceNote={autoAdvanceNote}
+                defaultViewMode={settings.defaultTimetableView || 'week'}
+                courseCardStyle={settings.courseCardStyle || 'left'}
+                showBreaks={settings.showBreaks !== false}
                 onChangeDate={handleChangeTimetableDate}
                 onToggleHomework={handleToggleHomework}
               />

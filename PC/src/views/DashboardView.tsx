@@ -15,6 +15,8 @@ import {
   UtensilsCrossed,
 } from 'lucide-react';
 import type {
+  DashboardLayout,
+  DashboardWidgetsConfig,
   GradesOverviewDTO,
   HomeworkDTO,
   NavTab,
@@ -50,6 +52,9 @@ interface DashboardViewProps {
   news: NewsItemDTO[];
   loading: boolean;
   messagingDisabled?: boolean;
+  layout?: DashboardLayout;
+  widgets?: DashboardWidgetsConfig;
+  showBreaks?: boolean;
   onNavigate: (tab: NavTab) => void;
   onToggleHomework: (id: string, done: boolean) => void;
 }
@@ -62,6 +67,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   news,
   loading,
   messagingDisabled = false,
+  layout = 'bento',
+  widgets = {
+    showKpis: true,
+    showTimetable: true,
+    showHomework: true,
+    showGrades: true,
+    showNews: true,
+  },
+  showBreaks = true,
   onNavigate,
   onToggleHomework,
 }) => {
@@ -125,7 +139,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   }, [timetableItems, todayLessons, now]);
 
   const activeDayTimeline = useMemo(() => {
-    const breaks = computeDayBreaks(nextActiveDay.items);
+    const breaks = showBreaks ? computeDayBreaks(nextActiveDay.items) : [];
     type Row =
       | { kind: 'lesson'; sortKey: number; item: TimetableItemDTO }
       | { kind: 'break'; sortKey: number; brk: (typeof breaks)[number] };
@@ -142,7 +156,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       })),
     ];
     return rows.sort((a, b) => a.sortKey - b.sortKey);
-  }, [nextActiveDay.items]);
+  }, [nextActiveDay.items, showBreaks]);
 
   const currentOrNextLesson = useMemo(() => {
     const active = timetableItems.filter((c) => !c.canceled);
@@ -257,6 +271,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       <RightToDisconnectNote serverDisabled={messagingDisabled} onlyWhenActive />
 
       {/* KPI Quick Strip */}
+      {widgets.showKpis && (
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
         <button
           onClick={() => onNavigate('timetable')}
@@ -335,11 +350,25 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </button>
       </div>
+      )}
 
-      {/* Main Bento Grid */}
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">
+      {/* Main Bento / Stacked Grid */}
+      <div
+        className={`grid gap-5 ${
+          layout === 'stacked' ? 'grid-cols-1' : 'grid-cols-1 xl:grid-cols-12'
+        }`}
+      >
         {/* Column 1: Timetable Snapshot */}
-        <section className="xl:col-span-5 rounded-2xl bg-[#0D0D12] border border-white/[0.06] p-5 flex flex-col">
+        {widgets.showTimetable && (
+        <section
+          className={`${
+            layout === 'stacked'
+              ? ''
+              : widgets.showHomework || widgets.showGrades || widgets.showNews
+              ? 'xl:col-span-5'
+              : 'xl:col-span-12'
+          } rounded-2xl bg-[#0D0D12] border border-white/[0.06] p-5 flex flex-col`}
+        >
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-[15px] font-semibold text-white">
@@ -492,10 +521,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           )}
         </section>
+        )}
 
         {/* Column 2: Homework + Recent Grades + News */}
-        <div className="xl:col-span-7 space-y-5">
+        {(widgets.showHomework || widgets.showGrades || widgets.showNews || profile.isDemo) && (
+        <div
+          className={`${
+            layout === 'stacked'
+              ? ''
+              : widgets.showTimetable
+              ? 'xl:col-span-7'
+              : 'xl:col-span-12'
+          } space-y-5`}
+        >
           {/* Homework Card */}
+          {widgets.showHomework && (
           <section className="rounded-2xl bg-[#0D0D12] border border-white/[0.06] p-5">
             <div className="flex items-center justify-between mb-4">
               <div>
@@ -567,10 +607,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
             )}
           </section>
+          )}
 
           {/* Bottom Split: Recent Grades & Recent News */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {(widgets.showGrades || widgets.showNews) && (
+          <div
+            className={`grid gap-5 ${
+              widgets.showGrades && widgets.showNews ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1'
+            }`}
+          >
             {/* Recent Grades */}
+            {widgets.showGrades && (
             <section className="rounded-2xl bg-[#0D0D12] border border-white/[0.06] p-5">
               <div className="flex items-center justify-between mb-3.5">
                 <h2 className="text-[14.5px] font-semibold text-white">Dernières notes</h2>
@@ -622,8 +669,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
               )}
             </section>
+            )}
 
             {/* Recent News */}
+            {widgets.showNews && (
             <section className="rounded-2xl bg-[#0D0D12] border border-white/[0.06] p-5">
               <div className="flex items-center justify-between mb-3.5">
                 <h2 className="text-[14.5px] font-semibold text-white">Informations récentes</h2>
@@ -659,17 +708,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
               )}
             </section>
+            )}
           </div>
+          )}
 
           {profile.isDemo && (
             <div className="p-3.5 rounded-xl bg-amber-500/[0.07] border border-amber-500/20 flex items-center gap-3 text-xs text-amber-200/90">
               <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
               <span>
-                Vous utilisez actuellement le <strong>Mode Démo</strong> (serveur officiel Index-Éducation). Déconnectez-vous en bas à gauche pour lier votre compte Lycée Connecté.
+                Vous utilisez actuellement le <strong>Mode Démo</strong> (serveur officiel Index-Éducation). Déconnectez-vous pour lier votre compte établissement / ENT.
               </span>
             </div>
           )}
         </div>
+        )}
       </div>
     </div>
   );
