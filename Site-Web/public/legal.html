@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#060608" />
+    <title>Noctis — Mentions légales & Confidentialité</title>
+    <link rel="icon" type="image/png" href="./icon.png" />
+    <style>
+      :root {
+        --bg: #050507;
+        --panel: #0d0d13;
+        --border: rgba(255, 255, 255, 0.08);
+        --accent: #8b74ff;
+        --text: #f4f4f6;
+        --muted: #9898aa;
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      body {
+        font-family: Inter, 'Segoe UI Variable', 'Segoe UI', -apple-system, BlinkMacSystemFont,
+          sans-serif;
+        background-color: var(--bg);
+        color: var(--text);
+        line-height: 1.65;
+        background-image: radial-gradient(
+          640px circle at 50% -120px,
+          rgba(139, 116, 255, 0.16),
+          transparent 62%
+        );
+      }
+      a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      nav {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        backdrop-filter: blur(18px);
+        background: rgba(5, 5, 7, 0.8);
+        border-bottom: 1px solid var(--border);
+      }
+      .nav-inner {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 0 22px;
+        height: 60px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 700;
+        color: #fff;
+      }
+      .brand img {
+        width: 28px;
+        height: 28px;
+        border-radius: 8px;
+      }
+      .nav-actions {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        font-size: 13px;
+      }
+      .btn {
+        padding: 7px 13px;
+        border-radius: 9px;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid var(--border);
+        color: #fff;
+        font-weight: 600;
+      }
+      .btn.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #060608;
+      }
+      main {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 42px 22px 72px;
+      }
+      h1 {
+        font-size: clamp(24px, 4vw, 34px);
+        letter-spacing: -0.025em;
+        margin-bottom: 8px;
+      }
+      .subtitle {
+        color: var(--muted);
+        font-size: 14px;
+        margin-bottom: 32px;
+      }
+      section {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        padding: 24px;
+        margin-bottom: 18px;
+      }
+      h2 {
+        font-size: 17px;
+        margin-bottom: 10px;
+        color: #fff;
+      }
+      p,
+      li {
+        font-size: 14px;
+        color: #c8c8d6;
+      }
+      p + p,
+      p + ul {
+        margin-top: 10px;
+      }
+      ul {
+        padding-left: 20px;
+      }
+      li + li {
+        margin-top: 6px;
+      }
+      code {
+        background: rgba(255, 255, 255, 0.07);
+        padding: 2px 6px;
+        border-radius: 6px;
+        font-size: 12.5px;
+      }
+      .highlight {
+        border-left: 3px solid var(--accent);
+        padding-left: 14px;
+        margin-top: 12px;
+        color: #e4dcff;
+      }
+      footer {
+        border-top: 1px solid var(--border);
+        text-align: center;
+        padding: 24px 22px;
+        color: var(--muted);
+        font-size: 12.5px;
+      }
+    </style>
+  </head>
+  <body>
+    <nav>
+      <div class="nav-inner">
+        <a href="./" class="brand">
+          <img src="./icon.png" alt="Logo Noctis" />
+          <span>Noctis</span>
+        </a>
+        <div class="nav-actions">
+          <a href="./" class="btn primary">Ouvrir Noctis Web</a>
+          <a href="./download.html" class="btn">Télécharger</a>
+        </div>
+      </div>
+    </nav>
+
+    <main>
+      <h1>Mentions légales & Politique de confidentialité</h1>
+      <p class="subtitle">
+        Dernière mise à jour : novembre 2026 · Projet open-source indépendant et non commercial
+      </p>
+
+      <section>
+        <h2>1. Éditeur du service</h2>
+        <p>
+          <strong>Noctis</strong> (applications Windows, Android et interface Noctis Web) est un
+          projet personnel, indépendant, gratuit et open-source, développé sans but lucratif ni
+          publicité.
+        </p>
+        <p>
+          <strong>Code source & contact :</strong>
+          <a href="https://github.com/Tipiltheglitcher/Noctis" target="_blank" rel="noreferrer"
+            >https://github.com/Tipiltheglitcher/Noctis</a
+          >
+          (pour toute demande, signalement de bug ou question légale, ouvrir une « Issue » sur le
+          dépôt GitHub).
+        </p>
+      </section>
+
+      <section>
+        <h2>2. Non-affiliation & Propriété intellectuelle</h2>
+        <p>
+          Noctis est un <strong>client tiers indépendant</strong>. Il n'est
+          <strong>ni affilié, ni sponsorisé, ni approuvé par Index-Éducation</strong>, par le
+          Ministère de l'Éducation nationale, ni par aucun ENT (Lycée Connecté, ÉduConnect,
+          MonBureauNumérique, Atrium, MonLycée.net, etc.).
+        </p>
+        <p>
+          La marque <strong>PRONOTE®</strong> et les noms des différents ENT appartiennent
+          exclusivement à leurs propriétaires respectifs.
+        </p>
+      </section>
+
+      <section>
+        <h2>3. Hébergement & Infrastructure</h2>
+        <ul>
+          <li>
+            <strong>Interface web statique (Noctis Web & page de téléchargement) :</strong> hébergée
+            par <strong>GitHub Pages</strong> — GitHub, Inc., 88 Colin P Kelly Jr St, San
+            Francisco, CA 94107, États-Unis.
+          </li>
+          <li>
+            <strong>Relais réseau CORS (Noctis Web uniquement) :</strong> hébergé sur
+            <strong>Cloudflare Workers</strong> — Cloudflare, Inc., 101 Townsend St, San Francisco,
+            CA 94107, États-Unis. Ce relais technique est strictement limité aux serveurs PRONOTE
+            HTTPS officiels des établissements scolaires.
+          </li>
+          <li>
+            <strong>Applications Noctis PC (.exe) et Android (.apk) :</strong> communiquent
+            <strong>directement</strong> entre ton appareil et le serveur PRONOTE de ton
+            établissement, sans passer par aucun relais intermédiaire.
+          </li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>4. Données personnelles & Confidentialité (RGPD)</h2>
+        <p>
+          Noctis a été conçu dès l'origine pour respecter strictement la vie privée des élèves :
+        </p>
+        <ul>
+          <li>
+            <strong>Aucune base de données distante :</strong> Noctis ne possède aucun serveur de
+            stockage de comptes, aucune base de données utilisateur, aucune publicité et aucun
+            traceur analytique tiers.
+          </li>
+          <li>
+            <strong>Relais sans état (zéro stockage) :</strong> sur Noctis Web, le Cloudflare Worker
+            se contente de transférer à la volée les requêtes HTTPS chiffrées entre ton navigateur
+            et le serveur PRONOTE de ton établissement. Aucun identifiant, mot de passe, jeton,
+            cookie ou donnée scolaire n'est stocké ni journalisé. Le code exact du relais est
+            vérifiable publiquement dans <code>Site-Web/cloudflare-worker/worker.js</code>.
+          </li>
+          <li>
+            <strong>Session éphémère sur le Web :</strong> sur Noctis Web, ta session PRONOTE reste
+            uniquement en mémoire vive de l'onglet et disparaît dès que tu fermes ou recharges la
+            page.
+          </li>
+          <li>
+            <strong>Stockage local uniquement :</strong> tes préférences visuelles (couleurs,
+            formes, disposition) sont enregistrées uniquement sur ton propre appareil
+            (<code>localStorage</code> sur le web, stockage local chiffré sur PC et Android).
+          </li>
+        </ul>
+        <p class="highlight">
+          Tu peux effacer l'ensemble de tes données locales à tout moment en te déconnectant ou en
+          vidant les données du site dans les paramètres de ton navigateur.
+        </p>
+      </section>
+
+      <section>
+        <h2>5. Conditions d'utilisation & Responsabilité</h2>
+        <p>
+          Noctis est fourni gratuitement « en l'état », sans garantie de disponibilité permanente ni
+          de compatibilité continue en cas d'évolution des serveurs PRONOTE. L'utilisateur reste
+          seul responsable de la confidentialité de ses identifiants scolaires et de ses QR Codes
+          PRONOTE (ne partage jamais une capture de ton QR Code PRONOTE à un tiers).
+        </p>
+      </section>
+    </main>
+
+    <footer>
+      Noctis — Client indépendant open-source · Non affilié à Index-Éducation ·
+      <a href="./">Noctis Web</a> · <a href="./download.html">Télécharger PC & Android</a>
+    </footer>
+  </body>
+</html>

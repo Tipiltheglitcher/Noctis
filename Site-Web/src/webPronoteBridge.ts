@@ -17,6 +17,7 @@ import {
   discussions,
   finishLoginManually,
   frequency,
+  geolocation,
   gradesOverview,
   loginCredentials,
   loginQrCode,
@@ -65,6 +66,7 @@ import type {
   NewsQuestionDTO,
   PeriodDTO,
   PronoteAPI,
+  SchoolSearchResult,
   StudentProfile,
   TimetableItemDTO,
   TimetableResponse,
@@ -373,6 +375,7 @@ class WebPronoteBridge {
   private localDemo = buildLocalDemoData();
   private newsMap = new Map<string, NewsInformation | NewsSurvey>();
   private discussionsMap = new Map<string, Discussion>();
+  private messagingDisabled = false;
   private pendingSecurity: { session: SessionHandle; error: SecurityError; deviceUUID: string } | null = null;
 
   private reset() {
@@ -386,6 +389,7 @@ class WebPronoteBridge {
     this.session = null;
     this.profileCache = null;
     this.localDemoMode = false;
+    this.messagingDisabled = false;
     this.pendingSecurity = null;
     this.newsMap.clear();
     this.discussionsMap.clear();
@@ -618,13 +622,79 @@ class WebPronoteBridge {
         logout: async () => {
           this.reset();
         },
-        searchSchools: async () => [],
+        searchSchools: async (query: string): Promise<SchoolSearchResult[]> => {
+          const trimmed = query.trim();
+          if (trimmed.length < 2) return [];
+          try {
+            const geoRes = await fetch(
+              `https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(trimmed)}&limit=5`
+            );
+            if (!geoRes.ok) return [];
+            const geoJson = (await geoRes.json()) as {
+              features?: Array<{ geometry?: { coordinates?: [number, number] } }>;
+            };
+            const features = geoJson.features ?? [];
+            if (features.length === 0) return [];
+
+            const fetcher = createRelayFetcher();
+            const byUrl = new Map<string, SchoolSearchResult>();
+            await Promise.all(
+              features.slice(0, 3).map(async (feat) => {
+                const coords = feat.geometry?.coordinates;
+                if (!coords) return;
+                const [longitude, latitude] = coords;
+                try {
+                  const found = await geolocation({ latitude, longitude }, fetcher);
+                  for (const item of found) {
+                    const cleaned = cleanURL(item.url);
+                    if (!byUrl.has(cleaned)) {
+                      byUrl.set(cleaned, {
+                        name: item.name,
+                        url: cleaned,
+                        postalCode: String(item.postalCode).padStart(5, '0'),
+                        distanceKm: Math.round((item.distance / 1000) * 10) / 10,
+                      });
+                    }
+                  }
+                } catch {
+                  // ignore individual lookup errors
+                }
+              })
+            );
+
+            const tokens = trimmed
+              .toLowerCase()
+              .normalize('NFD')
+              .replace(/[\u0300-\u036f]/g, '')
+              .split(/\s+/)
+              .filter((t) => t.length >= 2);
+
+            const results = Array.from(byUrl.values());
+            results.sort((a, b) => {
+              const normA = a.name
+                .toLowerCase()
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '');
+              const normB = b.name
+                .toLowerCase()
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '');
+              const scoreA = tokens.filter((t) => normA.includes(t)).length;
+              const scoreB = tokens.filter((t) => normB.includes(t)).length;
+              if (scoreB !== scoreA) return scoreB - scoreA;
+              return a.distanceKm - b.distanceKm;
+            });
+            return results.slice(0, 20);
+          } catch {
+            return [];
+          }
+        },
         onEntStatus: () => () => {},
       },
       data: {
         getProfile: async () => this.profileCache,
         getOfflineSnapshot: async () => null,
-        getMessagingDisabled: async () => false,
+        getMessagingDisabled: async () => this.messagingDisabled,
         getTimetable: async (dateISO) => {
           if (this.localDemoMode) {
             const end = new Date(this.localDemo.monday);
@@ -879,7 +949,12 @@ class WebPronoteBridge {
         getNews: async () => {
           if (this.localDemoMode) return this.localDemo.newsItems;
           try {
-            const data = await news(this.session!);
+            const data = (await news(this.session!)) as Awaited<ReturnType<typeof news>> & {
+              messagerieDesactivee?: boolean;
+            };
+            if (typeof data.messagerieDesactivee === 'boolean') {
+              this.messagingDisabled = data.messagerieDesactivee;
+            }
             this.newsMap.clear();
             return data.items
               .map((item) => {
@@ -897,10 +972,23 @@ class WebPronoteBridge {
             | ((NewsInformation | NewsSurvey) & { __needsDetail?: boolean; __fetchDetail?: () => Promise<NewsInformation | NewsSurvey> })
             | undefined;
           if (!item) return null;
-          if (!item.__needsDetail || typeof item.__fetchDetail !== 'function') return this.mapNews(item);
-          const full = await item.__fetchDetail();
-          this.newsMap.set(newsId, full);
-          return this.mapNews(full);
+          const mappedNow = this.mapNews(item);
+          const alreadyHasBody =
+            mappedNow.is === 'information'
+              ? Boolean(mappedNow.content?.trim()) || mappedNow.attachments.length > 0
+              : Boolean(
+                  mappedNow.questions?.some((q) => Boolean(q.content?.trim()) || q.choices.length > 0)
+                );
+          if ((!item.__needsDetail && alreadyHasBody) || typeof item.__fetchDetail !== 'function') {
+            return mappedNow;
+          }
+          try {
+            const full = await item.__fetchDetail();
+            this.newsMap.set(newsId, full);
+            return this.mapNews(full);
+          } catch {
+            return mappedNow;
+          }
         },
         markNewsRead: async (id) => {
           if (this.localDemoMode) return true;
@@ -930,7 +1018,12 @@ class WebPronoteBridge {
         getDiscussions: async (): Promise<DiscussionSummaryDTO[]> => {
           if (this.localDemoMode) return [];
           try {
-            const d = await discussions(this.session!);
+            const d = (await discussions(this.session!)) as Awaited<ReturnType<typeof discussions>> & {
+              messagerieDesactivee?: boolean;
+            };
+            if (typeof d.messagerieDesactivee === 'boolean' && d.messagerieDesactivee) {
+              this.messagingDisabled = true;
+            }
             this.discussionsMap.clear();
             return d.items.map((x) => {
               this.discussionsMap.set(x.participantsMessageID, x);

@@ -1,0 +1,19 @@
+{
+  "name": "Noctis Web — Espace scolaire",
+  "short_name": "Noctis",
+  "description": "Client web moderne et sombre pour PRONOTE (compatible iPhone, PC, Mac et Android).",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#060608",
+  "theme_color": "#060608",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "./icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

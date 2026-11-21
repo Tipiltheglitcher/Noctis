@@ -4,7 +4,7 @@
  * colle son URL ici (ex: "https://noctis-relay.ton-compte.workers.dev") et pousse sur GitHub :
  * tous tes potes pourront alors se connecter sur Noctis Web sans aucune configuration !
  */
-export const DEFAULT_RELAY_URL = '';
+export const DEFAULT_RELAY_URL = 'https://noctis-relay.maathixsrs.workers.dev';
 
 const RELAY_STORAGE_KEY = 'noctis_web_relay_url';
 

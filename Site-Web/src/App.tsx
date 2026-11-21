@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   LayoutDashboard,
   CalendarDays,
@@ -33,7 +33,14 @@ import { MessagesView } from '../../PC/src/views/MessagesView';
 import { MenusView } from '../../PC/src/views/MenusView';
 import { SettingsView } from '../../PC/src/views/SettingsView';
 import { applyThemeToDocument, DEFAULT_APP_SETTINGS } from '@/utils/theme';
+import {
+  evaluateDayAutoAdvance,
+  getInitialSchoolDate,
+  getWeekKey,
+  isWeekend,
+} from '@/utils/schoolTime';
 import { WebTopBar } from './components/WebTopBar';
+import { WebLoginView } from './components/WebLoginView';
 
 export default function App() {
   const [profile, setProfile] = useState<StudentProfile | null>(null);
@@ -44,8 +51,14 @@ export default function App() {
     notificationsEnabled: false,
   });
   const [refreshing, setRefreshing] = useState(false);
+  const [messagingDisabled, setMessagingDisabled] = useState(false);
 
-  const [timetableDate, setTimetableDate] = useState(() => new Date());
+  const [timetableDate, setTimetableDate] = useState(() => getInitialSchoolDate());
+  const [autoAdvanceNote, setAutoAdvanceNote] = useState<string | null>(() =>
+    isWeekend(new Date()) ? 'Week-end · Affichage de lundi' : null
+  );
+  const hasAutoAdvancedRef = useRef(false);
+
   const [timetable, setTimetable] = useState<TimetableResponse | null>(null);
   const [loadingTimetable, setLoadingTimetable] = useState(false);
   const [homework, setHomework] = useState<HomeworkDTO[]>([]);
@@ -59,28 +72,35 @@ export default function App() {
   const [news, setNews] = useState<NewsItemDTO[]>([]);
   const [discussions, setDiscussions] = useState<DiscussionSummaryDTO[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
-  const [menusDate, setMenusDate] = useState(() => new Date());
+  const [menusDate, setMenusDate] = useState(() => getInitialSchoolDate());
   const [menus, setMenus] = useState<MenuDayDTO[]>([]);
   const [loadingMenus, setLoadingMenus] = useState(false);
 
   useEffect(() => {
     window.pronoteAPI.system.getSettings().then(setSettings).catch(() => {});
-    // Launch directly into the interactive demo with zero login wall
-    window.pronoteAPI.auth.loginDemo().then((res) => {
-      if (res.ok && res.profile) {
-        handleAuthenticated(res.profile);
-      }
-    });
   }, []);
 
   useEffect(() => {
     applyThemeToDocument(settings);
   }, [settings]);
 
-  const fetchTimetableFor = useCallback(async (date: Date) => {
+  const fetchTimetableFor = useCallback(async (date: Date, allowAutoAdvance = false) => {
     setLoadingTimetable(true);
     try {
-      setTimetable(await window.pronoteAPI.data.getTimetable(date.toISOString()));
+      const data = await window.pronoteAPI.data.getTimetable(date.toISOString());
+      setTimetable(data);
+      if (allowAutoAdvance && !hasAutoAdvancedRef.current) {
+        hasAutoAdvancedRef.current = true;
+        const adv = evaluateDayAutoAdvance(data.items, new Date());
+        if (adv.shouldAdvance) {
+          setTimetableDate(adv.targetDate);
+          setAutoAdvanceNote(adv.label);
+          if (getWeekKey(adv.targetDate) !== getWeekKey(date)) {
+            const nextWeek = await window.pronoteAPI.data.getTimetable(adv.targetDate.toISOString());
+            setTimetable(nextWeek);
+          }
+        }
+      }
     } finally {
       setLoadingTimetable(false);
     }
@@ -126,6 +146,10 @@ export default function App() {
       ]);
       setNews(n);
       setDiscussions(d);
+      window.pronoteAPI.data
+        .getMessagingDisabled()
+        .then(setMessagingDisabled)
+        .catch(() => {});
     } finally {
       setLoadingMessages(false);
     }
@@ -140,46 +164,62 @@ export default function App() {
     }
   }, []);
 
-  const refreshAll = useCallback(async () => {
-    if (!profile) return;
-    setRefreshing(true);
-    await Promise.allSettled([
-      fetchTimetableFor(timetableDate),
-      fetchHomework(),
-      fetchGrades(gradePeriodId),
-      fetchAttendance(attPeriodId),
-      fetchMessages(),
-      fetchMenus(menusDate),
-    ]);
-    setRefreshing(false);
-  }, [
-    profile,
-    timetableDate,
-    gradePeriodId,
-    attPeriodId,
-    menusDate,
-    fetchTimetableFor,
-    fetchHomework,
-    fetchGrades,
-    fetchAttendance,
-    fetchMessages,
-    fetchMenus,
-  ]);
+  const refreshAll = useCallback(
+    async (allowAutoAdvance = false) => {
+      if (!profile) return;
+      setRefreshing(true);
+      await Promise.allSettled([
+        fetchTimetableFor(timetableDate, allowAutoAdvance),
+        fetchHomework(),
+        fetchGrades(gradePeriodId),
+        fetchAttendance(attPeriodId),
+        fetchMessages(),
+        fetchMenus(menusDate),
+      ]);
+      setRefreshing(false);
+    },
+    [
+      profile,
+      timetableDate,
+      gradePeriodId,
+      attPeriodId,
+      menusDate,
+      fetchTimetableFor,
+      fetchHomework,
+      fetchGrades,
+      fetchAttendance,
+      fetchMessages,
+      fetchMenus,
+    ]
+  );
 
   useEffect(() => {
-    if (profile) refreshAll();
+    if (profile) refreshAll(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);
 
   const handleAuthenticated = (p: StudentProfile) => {
-    setProfile(p);
+    hasAutoAdvancedRef.current = false;
+    setTimetableDate(getInitialSchoolDate());
+    setAutoAdvanceNote(isWeekend(new Date()) ? 'Week-end · Affichage de lundi' : null);
     setActiveTab('dashboard');
     setGradePeriodId(p.gradePeriods.find((x) => x.isDefault)?.id || p.gradePeriods[0]?.id || '');
     setAttPeriodId(p.attendancePeriods.find((x) => x.isDefault)?.id || p.attendancePeriods[0]?.id || '');
+    setProfile(p);
   };
 
   const handleLogout = async () => {
-    window.location.href = './';
+    await window.pronoteAPI.auth.logout();
+    setProfile(null);
+    setTimetable(null);
+    setHomework([]);
+    setGrades(null);
+    setAttendance(null);
+    setNews([]);
+    setDiscussions([]);
+    setMenus([]);
+    setMessagingDisabled(false);
+    hasAutoAdvancedRef.current = false;
   };
 
   const handleToggleHomework = async (id: string, done: boolean) => {
@@ -208,12 +248,14 @@ export default function App() {
 
   return (
     <div className="h-[100dvh] w-screen flex flex-col bg-[#060608] text-zinc-100 overflow-hidden">
-      <WebTopBar profile={profile} refreshing={refreshing} onRefresh={profile ? refreshAll : undefined} />
+      <WebTopBar
+        profile={profile}
+        refreshing={refreshing}
+        onRefresh={profile ? () => refreshAll(false) : undefined}
+      />
 
       {!profile ? (
-        <div className="flex-1 flex items-center justify-center text-sm text-zinc-400">
-          Chargement de la démo Noctis…
-        </div>
+        <WebLoginView onAuthenticated={handleAuthenticated} />
       ) : (
         <div
           className={`flex-1 min-h-0 flex flex-col overflow-hidden ${
@@ -243,6 +285,7 @@ export default function App() {
                 grades={grades}
                 news={news}
                 loading={refreshing}
+                messagingDisabled={messagingDisabled}
                 layout={settings.dashboardLayout || 'bento'}
                 widgets={settings.dashboardWidgets}
                 showBreaks={settings.showBreaks !== false}
@@ -256,12 +299,19 @@ export default function App() {
                 homework={homework}
                 selectedDate={timetableDate}
                 loading={loadingTimetable}
-                defaultViewMode={settings.defaultTimetableView || 'week'}
+                autoAdvanceNote={autoAdvanceNote}
+                defaultViewMode={
+                  typeof window !== 'undefined' && window.innerWidth < 768
+                    ? 'day'
+                    : settings.defaultTimetableView || 'week'
+                }
                 courseCardStyle={settings.courseCardStyle || 'left'}
                 showBreaks={settings.showBreaks !== false}
                 onChangeDate={(d) => {
+                  hasAutoAdvancedRef.current = true;
+                  setAutoAdvanceNote(null);
                   setTimetableDate(d);
-                  fetchTimetableFor(d);
+                  fetchTimetableFor(d, false);
                 }}
                 onToggleHomework={handleToggleHomework}
               />
@@ -302,6 +352,7 @@ export default function App() {
                 news={news}
                 discussions={discussions}
                 loading={loadingMessages}
+                messagingDisabled={messagingDisabled}
                 onMarkNewsRead={handleMarkNewsRead}
                 onNewsDetailLoaded={handleNewsDetailLoaded}
                 onRefreshAllMessages={fetchMessages}
@@ -322,10 +373,12 @@ export default function App() {
               <SettingsView
                 profile={profile}
                 settings={settings}
-                appVersion="Démo Web"
+                appVersion="Web 1.1.1"
                 checkingUpdate={false}
-                updateFeedback="Ceci est la démo interactive — télécharge Noctis PC ou Android pour ton compte."
-                onCheckUpdates={() => {}}
+                updateFeedback="Tu utilises Noctis Web (toujours à jour). Pour la connexion ENT intégrée et le mode hors ligne, télécharge Noctis PC ou Android."
+                onCheckUpdates={() => {
+                  window.location.href = './download.html';
+                }}
                 onUpdateSettings={async (p) => {
                   const next = await window.pronoteAPI.system.saveSettings(p);
                   setSettings(next);
@@ -335,8 +388,11 @@ export default function App() {
             )}
           </main>
 
-          {/* Mobile Bottom Nav Bar */}
-          <nav className="md:hidden shrink-0 bg-[#09090D] border-t border-white/[0.06] grid grid-cols-5 px-2 py-2">
+          {/* Mobile / iPhone Bottom Nav Bar */}
+          <nav
+            style={{ paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))' }}
+            className="md:hidden shrink-0 bg-[#09090D] border-t border-white/[0.06] grid grid-cols-5 px-2 pt-2"
+          >
             {(
               [
                 { id: 'dashboard', label: 'Accueil', icon: LayoutDashboard },
@@ -384,6 +440,7 @@ export default function App() {
             >
               <div
                 onClick={(e) => e.stopPropagation()}
+                style={{ paddingBottom: 'max(1.25rem, env(safe-area-inset-bottom))' }}
                 className="w-full rounded-t-3xl bg-[#101018] border-t border-white/10 p-5 space-y-3"
               >
                 <div className="flex items-center justify-between">
