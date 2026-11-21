@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import jsQR from 'jsqr';
 import {
   QrCode,
@@ -16,6 +16,9 @@ import {
   X,
   Lock,
   ExternalLink,
+  ArrowLeft,
+  ClipboardPaste,
+  School,
 } from 'lucide-react';
 import type {
   AuthResult,
@@ -23,6 +26,10 @@ import type {
   SecurityChallengeDTO,
   StudentProfile,
 } from '@shared/types';
+import {
+  inspectWebPronoteInstance,
+  type WebSchoolInstanceInfo,
+} from '../webPronoteBridge';
 
 interface ParsedQR {
   jeton: string;
@@ -37,7 +44,12 @@ interface WebLoginViewProps {
 function tryParseQrPayload(raw: string): ParsedQR | null {
   try {
     const obj = JSON.parse(raw.trim());
-    if (obj && typeof obj.jeton === 'string' && typeof obj.login === 'string' && typeof obj.url === 'string') {
+    if (
+      obj &&
+      typeof obj.jeton === 'string' &&
+      typeof obj.login === 'string' &&
+      typeof obj.url === 'string'
+    ) {
       return { jeton: obj.jeton, login: obj.login, url: obj.url };
     }
   } catch {
@@ -47,36 +59,41 @@ function tryParseQrPayload(raw: string): ParsedQR | null {
 }
 
 export const WebLoginView: React.FC<WebLoginViewProps> = ({ onAuthenticated }) => {
-  const [mode, setMode] = useState<'qr' | 'credentials'>('qr');
+  // Flow step: 'pick' (search school) | 'ent-qr' (ENT school detected -> open ENT + QR) | 'direct' (non-ENT school -> ID/pass) | 'quick-qr' (already have QR)
+  const [step, setStep] = useState<'pick' | 'ent-qr' | 'direct' | 'quick-qr'>('pick');
+
+  // School search & inspection state
+  const [schoolQuery, setSchoolQuery] = useState('');
+  const [schoolResults, setSchoolResults] = useState<SchoolSearchResult[]>([]);
+  const [searchingSchools, setSearchingSchools] = useState(false);
+  const [inspectingSchool, setInspectingSchool] = useState(false);
+  const [selectedSchool, setSelectedSchool] = useState<WebSchoolInstanceInfo | null>(null);
 
   // QR Code state
   const [qrData, setQrData] = useState<ParsedQR | null>(null);
   const [qrRawText, setQrRawText] = useState('');
   const [showManualJson, setShowManualJson] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const [pin, setPin] = useState('');
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number | null>(null);
+  const pinInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Credentials + Universal School Search state
-  const [schoolQuery, setSchoolQuery] = useState('');
-  const [schoolResults, setSchoolResults] = useState<SchoolSearchResult[]>([]);
-  const [searchingSchools, setSearchingSchools] = useState(false);
-  const [selectedSchoolName, setSelectedSchoolName] = useState<string | null>(null);
-  const [instanceUrl, setInstanceUrl] = useState('');
+  // Direct credentials state
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
 
-  // Shared auth state
+  // Shared auth / 2FA state
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [challenge, setChallenge] = useState<SecurityChallengeDTO | null>(null);
   const [challengePin, setChallengePin] = useState('');
   const [challengeDevice, setChallengeDevice] = useState('Noctis Web');
 
-  const stopCamera = () => {
+  const stopCamera = useCallback(() => {
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
@@ -86,16 +103,87 @@ export const WebLoginView: React.FC<WebLoginViewProps> = ({ onAuthenticated }) =
       streamRef.current = null;
     }
     setCameraOpen(false);
-  };
+  }, []);
 
   useEffect(() => {
     return () => stopCamera();
+  }, [stopCamera]);
+
+  const decodeQrFromFile = useCallback((file: File) => {
+    setError(null);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const maxDim = 1400;
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        if (!ctx) return;
+        ctx.drawImage(img, 0, 0, w, h);
+        const imgData = ctx.getImageData(0, 0, w, h);
+        const decoded = jsQR(imgData.data, w, h, { inversionAttempts: 'attemptBoth' });
+        if (!decoded?.data) {
+          setError(
+            "Aucun QR Code PRONOTE détecté sur cette image. Essaie de recadrer autour du QR Code."
+          );
+          return;
+        }
+        const parsed = tryParseQrPayload(decoded.data);
+        if (!parsed) {
+          setError("Ce QR Code n'est pas un QR Code PRONOTE valide.");
+          return;
+        }
+        setQrData(parsed);
+        setQrRawText(decoded.data);
+        setTimeout(() => pinInputRef.current?.focus(), 60);
+      };
+      img.src = String(reader.result || '');
+    };
+    reader.readAsDataURL(file);
   }, []);
 
-  // Debounced French school search
+  // Global Ctrl+V paste support for screenshots (Win+Shift+S -> Ctrl+V directly!)
   useEffect(() => {
+    if (step !== 'ent-qr' && step !== 'quick-qr') return;
+    const onPaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of Array.from(items)) {
+        if (item.type.startsWith('image/')) {
+          const file = item.getAsFile();
+          if (file) {
+            e.preventDefault();
+            decodeQrFromFile(file);
+            return;
+          }
+        }
+      }
+      const text = e.clipboardData?.getData('text/plain');
+      if (text) {
+        const parsed = tryParseQrPayload(text);
+        if (parsed) {
+          e.preventDefault();
+          setQrData(parsed);
+          setQrRawText(text);
+          setError(null);
+          setTimeout(() => pinInputRef.current?.focus(), 60);
+        }
+      }
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [step, decodeQrFromFile]);
+
+  // Debounced French school search via data.education.gouv.fr + PRONOTE geolocation
+  useEffect(() => {
+    if (step !== 'pick') return;
     const q = schoolQuery.trim();
-    if (q.length < 2) {
+    if (q.length < 2 || /^https?:\/\//i.test(q)) {
       setSchoolResults([]);
       return;
     }
@@ -108,12 +196,51 @@ export const WebLoginView: React.FC<WebLoginViewProps> = ({ onAuthenticated }) =
       } finally {
         if (!cancelled) setSearchingSchools(false);
       }
-    }, 350);
+    }, 320);
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [schoolQuery]);
+  }, [schoolQuery, step]);
+
+  const handleSelectSchool = async (nameFallback: string, url: string) => {
+    setError(null);
+    setInspectingSchool(true);
+    setSchoolResults([]);
+    try {
+      const info = await inspectWebPronoteInstance(url);
+      setSelectedSchool({
+        ...info,
+        name: info.name || nameFallback,
+      });
+      if (info.casURL) {
+        setStep('ent-qr');
+      } else {
+        setStep('direct');
+      }
+    } catch {
+      const cleaned = url.replace(/\/$/, '');
+      setSelectedSchool({
+        name: nameFallback || cleaned,
+        url: cleaned,
+        eleveUrl: `${cleaned}/eleve.html`,
+      });
+      setStep('direct');
+    } finally {
+      setInspectingSchool(false);
+    }
+  };
+
+  const handleDirectUrlSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const q = schoolQuery.trim();
+    if (/^https?:\/\//i.test(q) || q.includes('index-education.net')) {
+      const fullUrl = /^https?:\/\//i.test(q) ? q : `https://${q}`;
+      await handleSelectSchool(q, fullUrl);
+    } else if (schoolResults.length === 1) {
+      await handleSelectSchool(schoolResults[0].name, schoolResults[0].url);
+    }
+  };
 
   const startCamera = async () => {
     setError(null);
@@ -152,6 +279,7 @@ export const WebLoginView: React.FC<WebLoginViewProps> = ({ onAuthenticated }) =
                   setQrData(parsed);
                   setQrRawText(code.data);
                   stopCamera();
+                  setTimeout(() => pinInputRef.current?.focus(), 60);
                   return;
                 }
               }
@@ -163,47 +291,10 @@ export const WebLoginView: React.FC<WebLoginViewProps> = ({ onAuthenticated }) =
       });
     } catch {
       setCameraError(
-        "Impossible d'accéder à la caméra. Autorise la caméra ou importe simplement une capture d'écran du QR Code."
+        "Impossible d'accéder à la caméra. Autorise la caméra ou importe simplement une capture d'écran (ou Ctrl+V sur PC)."
       );
       stopCamera();
     }
-  };
-
-  const handleQrImageUpload = (file: File) => {
-    setError(null);
-    const reader = new FileReader();
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        const maxDim = 1400;
-        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
-        const w = Math.max(1, Math.round(img.width * scale));
-        const h = Math.max(1, Math.round(img.height * scale));
-        const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d', { willReadFrequently: true });
-        if (!ctx) return;
-        ctx.drawImage(img, 0, 0, w, h);
-        const imgData = ctx.getImageData(0, 0, w, h);
-        const decoded = jsQR(imgData.data, w, h, { inversionAttempts: 'attemptBoth' });
-        if (!decoded?.data) {
-          setError(
-            "Aucun QR Code PRONOTE détecté sur cette image. Essaie de recadrer autour du QR Code."
-          );
-          return;
-        }
-        const parsed = tryParseQrPayload(decoded.data);
-        if (!parsed) {
-          setError("Ce QR Code n'est pas un QR Code PRONOTE valide.");
-          return;
-        }
-        setQrData(parsed);
-        setQrRawText(decoded.data);
-      };
-      img.src = String(reader.result || '');
-    };
-    reader.readAsDataURL(file);
   };
 
   const handleAuthResult = (res: AuthResult) => {
@@ -224,7 +315,7 @@ export const WebLoginView: React.FC<WebLoginViewProps> = ({ onAuthenticated }) =
     e.preventDefault();
     const parsed = qrData || tryParseQrPayload(qrRawText);
     if (!parsed) {
-      setError('Scanne ou importe d’abord ton QR Code PRONOTE.');
+      setError('Scanne, importe ou colle (Ctrl+V) d’abord ton QR Code PRONOTE.');
       return;
     }
     if (!/^\d{4}$/.test(pin.trim())) {
@@ -245,8 +336,8 @@ export const WebLoginView: React.FC<WebLoginViewProps> = ({ onAuthenticated }) =
 
   const handleCredsSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!instanceUrl.trim()) {
-      setError("Sélectionne ton établissement ou entre son adresse PRONOTE.");
+    if (!selectedSchool?.url) {
+      setError("Sélectionne d'abord ton établissement.");
       return;
     }
     if (!username.trim() || !password) {
@@ -257,7 +348,7 @@ export const WebLoginView: React.FC<WebLoginViewProps> = ({ onAuthenticated }) =
     setError(null);
     try {
       const res = await window.pronoteAPI.auth.loginCredentials({
-        url: instanceUrl.trim(),
+        url: selectedSchool.url,
         username: username.trim(),
         password,
       });
@@ -286,11 +377,25 @@ export const WebLoginView: React.FC<WebLoginViewProps> = ({ onAuthenticated }) =
     }
   };
 
+  const resetToPicker = () => {
+    stopCamera();
+    setStep('pick');
+    setSelectedSchool(null);
+    setError(null);
+    setQrData(null);
+    setQrRawText('');
+    setPin('');
+    setPassword('');
+  };
+
+  const isUrlInput =
+    /^https?:\/\//i.test(schoolQuery.trim()) || schoolQuery.trim().includes('index-education.net');
+
   return (
     <div className="flex-1 min-h-0 overflow-y-auto obsidian-glow bg-[#060608] flex flex-col">
-      <div className="flex-1 w-full max-w-xl mx-auto px-4 py-8 sm:py-12 flex flex-col justify-center">
+      <div className="flex-1 w-full max-w-xl mx-auto px-4 py-7 sm:py-11 flex flex-col justify-center">
         {/* Hero Brand */}
-        <div className="text-center mb-7">
+        <div className="text-center mb-6">
           <div className="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-br from-accent/90 to-accent/35 border border-white/15 shadow-glow flex items-center justify-center mb-3.5">
             <span className="text-2xl font-black text-white leading-none">N</span>
           </div>
@@ -298,14 +403,36 @@ export const WebLoginView: React.FC<WebLoginViewProps> = ({ onAuthenticated }) =
             Connexion à Noctis Web
           </h1>
           <p className="text-xs sm:text-sm text-zinc-400 mt-1.5 max-w-md mx-auto">
-            Accède à ton vrai espace scolaire PRONOTE directement depuis ton navigateur (PC, Mac,
-            iPhone ou Android).
+            Choisis ton lycée ou collège — Noctis détecte automatiquement la meilleure méthode de
+            connexion.
           </p>
         </div>
 
-        {/* Main Login Card */}
-        <div className="rounded-3xl bg-[#0D0D14] border border-white/[0.08] p-5 sm:p-6 shadow-2xl space-y-5">
+        {/* Main Card */}
+        <div
+          onDragOver={(e) => {
+            if (step === 'ent-qr' || step === 'quick-qr') {
+              e.preventDefault();
+              setDragOver(true);
+            }
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => {
+            if (step === 'ent-qr' || step === 'quick-qr') {
+              e.preventDefault();
+              setDragOver(false);
+              const file = e.dataTransfer.files?.[0];
+              if (file && file.type.startsWith('image/')) {
+                decodeQrFromFile(file);
+              }
+            }
+          }}
+          className={`rounded-3xl bg-[#0D0D14] border p-5 sm:p-6 shadow-2xl space-y-5 transition-colors ${
+            dragOver ? 'border-accent ring-2 ring-accent/30' : 'border-white/[0.08]'
+          }`}
+        >
           {challenge ? (
+            /* ===== 2FA CHALLENGE ===== */
             <form onSubmit={handleChallengeSubmit} className="space-y-4">
               <div className="flex items-center gap-2.5 text-sm font-bold text-white">
                 <ShieldCheck className="w-5 h-5 text-accent" />
@@ -376,403 +503,457 @@ export const WebLoginView: React.FC<WebLoginViewProps> = ({ onAuthenticated }) =
                 </button>
               </div>
             </form>
-          ) : (
-            <>
-              {/* Mode Switcher */}
-              <div className="grid grid-cols-2 gap-1.5 p-1 rounded-2xl bg-[#08080D] border border-white/[0.06]">
-                <button
-                  type="button"
-                  onClick={() => {
-                    stopCamera();
-                    setMode('qr');
-                    setError(null);
-                  }}
-                  className={`py-2.5 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all ${
-                    mode === 'qr'
-                      ? 'bg-accent text-black shadow-glow'
-                      : 'text-zinc-400 hover:text-white'
-                  }`}
-                >
-                  <QrCode className="w-4 h-4" />
-                  <span>QR Code (ENT)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    stopCamera();
-                    setMode('credentials');
-                    setError(null);
-                  }}
-                  className={`py-2.5 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all ${
-                    mode === 'credentials'
-                      ? 'bg-accent text-black shadow-glow'
-                      : 'text-zinc-400 hover:text-white'
-                  }`}
-                >
-                  <KeyRound className="w-4 h-4" />
-                  <span>Identifiants directs</span>
-                </button>
+          ) : step === 'pick' ? (
+            /* ===== STEP 1: CHOOSE YOUR SCHOOL ===== */
+            <div className="space-y-4">
+              <form onSubmit={handleDirectUrlSubmit} className="space-y-2.5">
+                <label className="block text-xs font-semibold text-zinc-200">
+                  1. Recherche ton collège ou lycée (nom, ville, code postal ou URL PRONOTE)
+                </label>
+                <div className="relative">
+                  <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    autoFocus
+                    spellCheck={false}
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    value={schoolQuery}
+                    onChange={(e) => {
+                      setSchoolQuery(e.target.value);
+                      setError(null);
+                    }}
+                    placeholder="Ex : Lyon, 69001, Lycée Victor Hugo…"
+                    className="w-full pl-10 pr-10 py-3 rounded-xl bg-[#08080D] border border-white/[0.12] text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-accent"
+                  />
+                  {searchingSchools || inspectingSchool ? (
+                    <Loader2 className="w-4 h-4 text-accent animate-spin absolute right-3.5 top-1/2 -translate-y-1/2" />
+                  ) : schoolQuery.length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSchoolQuery('');
+                        setSchoolResults([]);
+                      }}
+                      className="text-zinc-500 hover:text-zinc-200 absolute right-3.5 top-1/2 -translate-y-1/2"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  ) : null}
+                </div>
+
+                {inspectingSchool && (
+                  <div className="p-3 rounded-xl bg-accent/10 border border-accent/25 text-xs text-accent flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                    <span>Détection du portail ENT / PRONOTE de ton établissement…</span>
+                  </div>
+                )}
+
+                {isUrlInput && !inspectingSchool && (
+                  <button
+                    type="submit"
+                    className="w-full py-2.5 rounded-xl bg-accent text-black text-xs font-bold hover:opacity-90"
+                  >
+                    Continuer avec cette adresse PRONOTE →
+                  </button>
+                )}
+
+                {schoolResults.length > 0 && !inspectingSchool && (
+                  <div className="max-h-60 overflow-y-auto rounded-2xl bg-[#08080D] border border-white/[0.08] divide-y divide-white/[0.05]">
+                    {schoolResults.map((s) => (
+                      <button
+                        key={s.url}
+                        type="button"
+                        onClick={() => handleSelectSchool(s.name, s.url)}
+                        className="w-full px-3.5 py-2.5 text-left hover:bg-accent/10 flex items-center justify-between gap-2.5 transition-colors"
+                      >
+                        <div className="min-w-0">
+                          <div className="text-xs font-bold text-white truncate">{s.name}</div>
+                          <div className="text-[11px] text-zinc-500 truncate">
+                            {s.postalCode} · {s.url.replace(/^https?:\/\//, '')}
+                          </div>
+                        </div>
+                        <MapPin className="w-4 h-4 text-accent shrink-0" />
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {schoolQuery.trim().length >= 2 &&
+                  !isUrlInput &&
+                  !searchingSchools &&
+                  !inspectingSchool &&
+                  schoolResults.length === 0 && (
+                    <div className="px-3.5 py-2.5 rounded-xl bg-[#08080D] border border-white/[0.06] text-xs text-zinc-400">
+                      Aucun établissement PRONOTE trouvé pour « {schoolQuery.trim()} ». Essaie avec
+                      le nom du lycée/collège ou son code postal.
+                    </div>
+                  )}
+              </form>
+
+              <div className="relative flex items-center py-1">
+                <div className="flex-1 border-t border-white/[0.07]" />
+                <span className="px-3 text-[11px] text-zinc-500">ou</span>
+                <div className="flex-1 border-t border-white/[0.07]" />
               </div>
 
-              {mode === 'qr' ? (
-                <form onSubmit={handleQrSubmit} className="space-y-4">
-                  {/* How to get QR Code */}
-                  <div className="p-3.5 rounded-2xl bg-accent/[0.07] border border-accent/20 text-[11.5px] text-zinc-300 space-y-1.5 leading-relaxed">
-                    <div className="font-semibold text-white">
-                      Compatible avec tous les ENT de France (Lycée Connecté, ÉduConnect, Atrium…)
-                    </div>
-                    <ol className="list-decimal list-inside space-y-0.5 text-zinc-400">
-                      <li>Ouvre PRONOTE depuis ton ENT habituel.</li>
-                      <li>
-                        Clique sur l'icône <strong className="text-zinc-200">QR Code</strong> en
-                        haut de PRONOTE et choisis un code à 4 chiffres.
-                      </li>
-                      <li>
-                        Scanne-le avec ta caméra ou importe simplement une capture d'écran ci-dessous.
-                      </li>
-                    </ol>
+              <button
+                type="button"
+                onClick={() => {
+                  setError(null);
+                  setStep('quick-qr');
+                }}
+                className="w-full py-2.5 px-4 rounded-xl bg-white/[0.05] hover:bg-white/[0.09] border border-white/[0.09] text-xs font-semibold text-zinc-200 flex items-center justify-center gap-2 transition-colors"
+              >
+                <QrCode className="w-4 h-4 text-accent" />
+                <span>J'ai déjà mon QR Code PRONOTE</span>
+              </button>
+            </div>
+          ) : step === 'ent-qr' || step === 'quick-qr' ? (
+            /* ===== STEP 2A: ENT DETECTED -> OPEN ENT + INSTANT QR PASTE/UPLOAD/SCAN ===== */
+            <form onSubmit={handleQrSubmit} className="space-y-4">
+              {/* Top School Header + Back */}
+              <div className="flex items-center justify-between gap-2 pb-3 border-b border-white/[0.07]">
+                <button
+                  type="button"
+                  onClick={resetToPicker}
+                  className="inline-flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white transition-colors"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>Changer</span>
+                </button>
+                {selectedSchool ? (
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <School className="w-3.5 h-3.5 text-accent shrink-0" />
+                    <span className="text-xs font-bold text-white truncate">
+                      {selectedSchool.name}
+                    </span>
                   </div>
+                ) : (
+                  <span className="text-xs font-bold text-white inline-flex items-center gap-1.5">
+                    <QrCode className="w-3.5 h-3.5 text-accent" />
+                    Connexion par QR Code
+                  </span>
+                )}
+              </div>
 
-                  {/* QR Capture Buttons */}
-                  {!qrData ? (
-                    <div className="space-y-2.5">
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                        <label className="cursor-pointer py-3 px-4 rounded-xl bg-white/[0.06] hover:bg-white/[0.1] border border-white/[0.1] text-xs font-semibold text-white flex items-center justify-center gap-2 transition-colors">
-                          <ImagePlus className="w-4 h-4 text-accent" />
-                          <span>Importer une capture</span>
-                          <input
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              if (file) handleQrImageUpload(file);
-                              e.target.value = '';
-                            }}
-                          />
-                        </label>
-                        <button
-                          type="button"
-                          onClick={cameraOpen ? stopCamera : startCamera}
-                          className="py-3 px-4 rounded-xl bg-white/[0.06] hover:bg-white/[0.1] border border-white/[0.1] text-xs font-semibold text-white flex items-center justify-center gap-2 transition-colors"
-                        >
-                          <Camera className="w-4 h-4 text-accent" />
-                          <span>{cameraOpen ? 'Fermer la caméra' : 'Scanner avec la caméra'}</span>
-                        </button>
-                      </div>
+              {/* Step 1: Open School ENT directly (when ENT school selected) */}
+              {selectedSchool && (
+                <div className="p-3.5 rounded-2xl bg-accent/[0.08] border border-accent/25 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-white">
+                      Étape 1 · Ouvre ton ENT ({selectedSchool.casHost || 'PRONOTE'})
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full bg-accent/20 text-accent text-[10px] font-bold">
+                      ENT détecté
+                    </span>
+                  </div>
+                  <p className="text-[11.5px] text-zinc-300 leading-relaxed">
+                    Connecte-toi sur ton ENT, clique sur l'icône{' '}
+                    <strong className="text-white">QR Code</strong> en haut de PRONOTE et choisis 4
+                    chiffres (ex. <code className="px-1 py-0.5 rounded bg-black/40">0000</code>).
+                  </p>
+                  <a
+                    href={selectedSchool.eleveUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="w-full py-2.5 px-4 rounded-xl bg-accent text-black text-xs font-bold flex items-center justify-center gap-2 shadow-glow hover:opacity-90 transition-opacity"
+                  >
+                    <span>Ouvrir mon ENT / PRONOTE</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                </div>
+              )}
 
-                      {cameraError && (
-                        <div className="p-2.5 rounded-xl bg-amber-500/12 border border-amber-500/25 text-[11.5px] text-amber-200">
-                          {cameraError}
-                        </div>
-                      )}
+              {/* Step 2: Paste / Upload / Scan QR Code */}
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-white">
+                    {selectedSchool ? 'Étape 2 · Donne le QR Code à Noctis' : 'QR Code PRONOTE'}
+                  </span>
+                  <span className="hidden sm:inline-flex items-center gap-1 text-[10.5px] text-accent">
+                    <ClipboardPaste className="w-3 h-3" />
+                    Ctrl+V accepté !
+                  </span>
+                </div>
 
-                      {cameraOpen && (
-                        <div className="relative rounded-2xl overflow-hidden bg-black border border-accent/40 aspect-square max-h-64 mx-auto">
-                          <video
-                            ref={videoRef}
-                            playsInline
-                            muted
-                            className="w-full h-full object-cover"
-                          />
-                          <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                            <div className="w-44 h-44 rounded-2xl border-2 border-accent shadow-glow" />
-                          </div>
-                          <button
-                            type="button"
-                            onClick={stopCamera}
-                            className="absolute top-2.5 right-2.5 p-1.5 rounded-lg bg-black/70 text-white"
-                          >
-                            <X className="w-4 h-4" />
-                          </button>
-                        </div>
-                      )}
-
-                      <div className="text-center">
-                        <button
-                          type="button"
-                          onClick={() => setShowManualJson((v) => !v)}
-                          className="text-[11px] text-zinc-500 hover:text-zinc-300 underline underline-offset-2"
-                        >
-                          {showManualJson
-                            ? 'Masquer le collage manuel'
-                            : 'Ou coller le JSON du QR Code manuellement'}
-                        </button>
-                      </div>
-
-                      {showManualJson && (
-                        <textarea
-                          rows={3}
-                          value={qrRawText}
+                {!qrData ? (
+                  <div className="space-y-2.5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <label className="cursor-pointer py-3 px-4 rounded-xl bg-white/[0.06] hover:bg-white/[0.1] border border-white/[0.1] text-xs font-semibold text-white flex items-center justify-center gap-2 transition-colors">
+                        <ImagePlus className="w-4 h-4 text-accent" />
+                        <span>Importer une capture</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
                           onChange={(e) => {
-                            setQrRawText(e.target.value);
-                            const parsed = tryParseQrPayload(e.target.value);
-                            if (parsed) setQrData(parsed);
+                            const file = e.target.files?.[0];
+                            if (file) decodeQrFromFile(file);
+                            e.target.value = '';
                           }}
-                          placeholder='{"jeton":"...","login":"...","url":"https://..."}'
-                          className="w-full p-3 rounded-xl bg-[#08080D] border border-white/[0.1] text-xs font-mono text-zinc-200 focus:outline-none focus:border-accent"
                         />
-                      )}
-                    </div>
-                  ) : (
-                    <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
-                        <div className="min-w-0">
-                          <div className="text-xs font-bold text-emerald-200">
-                            QR Code PRONOTE détecté
-                          </div>
-                          <div className="text-[11px] text-emerald-300/80 truncate">
-                            {qrData.url.replace(/^https?:\/\//, '')}
-                          </div>
-                        </div>
-                      </div>
+                      </label>
                       <button
                         type="button"
-                        onClick={() => {
-                          setQrData(null);
-                          setQrRawText('');
-                        }}
-                        className="px-2.5 py-1 rounded-lg bg-white/[0.06] text-[11px] text-zinc-300 hover:text-white shrink-0"
+                        onClick={cameraOpen ? stopCamera : startCamera}
+                        className="py-3 px-4 rounded-xl bg-white/[0.06] hover:bg-white/[0.1] border border-white/[0.1] text-xs font-semibold text-white flex items-center justify-center gap-2 transition-colors"
                       >
-                        Changer
+                        <Camera className="w-4 h-4 text-accent" />
+                        <span>{cameraOpen ? 'Fermer la caméra' : 'Scanner à la caméra'}</span>
                       </button>
                     </div>
-                  )}
 
-                  {/* 4-digit PIN */}
-                  <div>
-                    <label className="block text-xs font-medium text-zinc-300 mb-1.5">
-                      Code PIN à 4 chiffres (choisi sur PRONOTE)
-                    </label>
-                    <input
-                      type="password"
-                      inputMode="numeric"
-                      maxLength={4}
-                      value={pin}
-                      onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                      placeholder="Ex : 1234"
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-[#08080D] border border-white/[0.1] text-sm text-white tracking-[0.3em] font-semibold focus:outline-none focus:border-accent"
-                    />
-                  </div>
+                    <p className="text-[11px] text-zinc-400 text-center hidden sm:block">
+                      Astuce rapide sur PC : fais{' '}
+                      <kbd className="px-1.5 py-0.5 rounded bg-white/[0.08] text-zinc-200 font-mono text-[10px]">
+                        Win + Shift + S
+                      </kbd>{' '}
+                      sur le QR Code puis{' '}
+                      <kbd className="px-1.5 py-0.5 rounded bg-white/[0.08] text-zinc-200 font-mono text-[10px]">
+                        Ctrl + V
+                      </kbd>{' '}
+                      directement ici (ou glisse l'image).
+                    </p>
 
-                  {error && (
-                    <div
-                      className={`p-3.5 rounded-xl border text-xs space-y-2.5 ${
-                        error.startsWith('ENT_REQUIRED::')
-                          ? 'bg-amber-500/12 border-amber-400/35 text-amber-100'
-                          : 'bg-rose-500/12 border-rose-500/30 text-rose-200'
-                      }`}
-                    >
-                      <div className="flex items-start gap-2">
-                        <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                        <span className="leading-relaxed">
-                          {error.replace(/^ENT_REQUIRED::/, '')}
-                        </span>
-                      </div>
-                      {error.startsWith('ENT_REQUIRED::') && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setMode('qr');
-                            setError(null);
-                          }}
-                          className="w-full py-2 px-3 rounded-lg bg-accent text-black font-bold text-xs flex items-center justify-center gap-1.5 hover:opacity-90"
-                        >
-                          <QrCode className="w-3.5 h-3.5" />
-                          Passer sur la connexion QR Code (ENT)
-                        </button>
-                      )}
-                    </div>
-                  )}
-
-                  <button
-                    type="submit"
-                    disabled={submitting || !qrData || pin.length !== 4}
-                    className="w-full py-3 rounded-xl bg-accent text-black text-sm font-bold flex items-center justify-center gap-2 shadow-glow hover:opacity-90 disabled:opacity-45 transition-opacity"
-                  >
-                    {submitting ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Connexion en cours…
-                      </>
-                    ) : (
-                      'Se connecter à mon PRONOTE'
-                    )}
-                  </button>
-                </form>
-              ) : (
-                <form onSubmit={handleCredsSubmit} className="space-y-4">
-                  {/* Universal School Search */}
-                  <div className="space-y-2">
-                    <label className="block text-xs font-medium text-zinc-300">
-                      Rechercher ton établissement (ville, code postal ou nom)
-                    </label>
-                    <div className="relative">
-                      <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                      <input
-                        type="text"
-                        spellCheck={false}
-                        autoCorrect="off"
-                        autoCapitalize="off"
-                        value={schoolQuery}
-                        onChange={(e) => {
-                          setSchoolQuery(e.target.value);
-                          setSelectedSchoolName(null);
-                        }}
-                        placeholder="Ex : Lyon, 69001, Lycée Victor Hugo…"
-                        className="w-full pl-10 pr-9 py-2.5 rounded-xl bg-[#08080D] border border-white/[0.1] text-xs text-white focus:outline-none focus:border-accent"
-                      />
-                      {searchingSchools ? (
-                        <Loader2 className="w-4 h-4 text-accent animate-spin absolute right-3 top-1/2 -translate-y-1/2" />
-                      ) : schoolQuery.length > 0 ? (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSchoolQuery('');
-                            setSelectedSchoolName(null);
-                            setSchoolResults([]);
-                          }}
-                          className="text-zinc-500 hover:text-zinc-200 absolute right-3 top-1/2 -translate-y-1/2"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      ) : null}
-                    </div>
-
-                    {schoolResults.length > 0 && !selectedSchoolName && (
-                      <div className="max-h-48 overflow-y-auto rounded-xl bg-[#08080D] border border-white/[0.08] divide-y divide-white/[0.05]">
-                        {schoolResults.map((s) => (
-                          <button
-                            key={s.url}
-                            type="button"
-                            onClick={() => {
-                              setInstanceUrl(s.url);
-                              setSelectedSchoolName(s.name);
-                              setSchoolQuery(s.name);
-                              setSchoolResults([]);
-                            }}
-                            className="w-full px-3 py-2 text-left hover:bg-white/[0.05] flex items-center justify-between gap-2"
-                          >
-                            <div className="min-w-0">
-                              <div className="text-xs font-semibold text-white truncate">
-                                {s.name}
-                              </div>
-                              <div className="text-[10.5px] text-zinc-500 truncate">
-                                {s.postalCode} · {s.url.replace(/^https?:\/\//, '')}
-                              </div>
-                            </div>
-                            <MapPin className="w-3.5 h-3.5 text-accent shrink-0" />
-                          </button>
-                        ))}
+                    {cameraError && (
+                      <div className="p-2.5 rounded-xl bg-amber-500/12 border border-amber-500/25 text-[11.5px] text-amber-200">
+                        {cameraError}
                       </div>
                     )}
 
-                    {schoolQuery.trim().length >= 2 &&
-                      !searchingSchools &&
-                      !selectedSchoolName &&
-                      schoolResults.length === 0 && (
-                        <div className="px-3 py-2 rounded-xl bg-[#08080D] border border-white/[0.06] text-[11px] text-zinc-500">
-                          Aucun établissement PRONOTE trouvé pour « {schoolQuery.trim()} ». Essaie
-                          avec le nom du lycée/collège ou le code postal.
+                    {cameraOpen && (
+                      <div className="relative rounded-2xl overflow-hidden bg-black border border-accent/40 aspect-square max-h-64 mx-auto">
+                        <video
+                          ref={videoRef}
+                          playsInline
+                          muted
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                          <div className="w-44 h-44 rounded-2xl border-2 border-accent shadow-glow" />
                         </div>
-                      )}
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-zinc-300 mb-1.5">
-                      Adresse PRONOTE de l'établissement
-                    </label>
-                    <input
-                      type="url"
-                      value={instanceUrl}
-                      onChange={(e) => setInstanceUrl(e.target.value)}
-                      placeholder="https://0690000x.index-education.net/pronote"
-                      className="w-full px-3.5 py-2.5 rounded-xl bg-[#08080D] border border-white/[0.1] text-xs text-white focus:outline-none focus:border-accent"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-zinc-300 mb-1.5">
-                        Identifiant élève
-                      </label>
-                      <input
-                        type="text"
-                        autoComplete="username"
-                        value={username}
-                        onChange={(e) => setUsername(e.target.value)}
-                        placeholder="Identifiant"
-                        className="w-full px-3.5 py-2.5 rounded-xl bg-[#08080D] border border-white/[0.1] text-xs text-white focus:outline-none focus:border-accent"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-zinc-300 mb-1.5">
-                        Mot de passe
-                      </label>
-                      <input
-                        type="password"
-                        autoComplete="current-password"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        placeholder="••••••••"
-                        className="w-full px-3.5 py-2.5 rounded-xl bg-[#08080D] border border-white/[0.1] text-xs text-white focus:outline-none focus:border-accent"
-                      />
-                    </div>
-                  </div>
-
-                  <p className="text-[11px] text-zinc-500 leading-relaxed">
-                    Si ton établissement passe par un ENT (ÉduConnect / Lycée Connecté…), utilise
-                    l'onglet <strong className="text-zinc-300">QR Code (ENT)</strong>.
-                  </p>
-
-                  {error && (
-                    <div
-                      className={`p-3.5 rounded-xl border text-xs space-y-2.5 ${
-                        error.startsWith('ENT_REQUIRED::')
-                          ? 'bg-amber-500/12 border-amber-400/35 text-amber-100'
-                          : 'bg-rose-500/12 border-rose-500/30 text-rose-200'
-                      }`}
-                    >
-                      <div className="flex items-start gap-2">
-                        <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                        <span className="leading-relaxed">
-                          {error.replace(/^ENT_REQUIRED::/, '')}
-                        </span>
+                        <button
+                          type="button"
+                          onClick={stopCamera}
+                          className="absolute top-2.5 right-2.5 p-1.5 rounded-lg bg-black/70 text-white"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
                       </div>
-                      {error.startsWith('ENT_REQUIRED::') && (
+                    )}
+
+                    <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
+                      <button
+                        type="button"
+                        onClick={() => setShowManualJson((v) => !v)}
+                        className="text-[11px] text-zinc-500 hover:text-zinc-300 underline underline-offset-2"
+                      >
+                        {showManualJson ? 'Masquer JSON' : 'Coller le JSON manuellement'}
+                      </button>
+                      {selectedSchool && (
                         <button
                           type="button"
                           onClick={() => {
-                            setMode('qr');
+                            stopCamera();
                             setError(null);
+                            setStep('direct');
                           }}
-                          className="w-full py-2 px-3 rounded-lg bg-accent text-black font-bold text-xs flex items-center justify-center gap-1.5 hover:opacity-90"
+                          className="text-[11px] text-zinc-500 hover:text-zinc-300 underline underline-offset-2"
                         >
-                          <QrCode className="w-3.5 h-3.5" />
-                          Passer sur la connexion QR Code (ENT)
+                          Essayer par identifiants directs
                         </button>
                       )}
                     </div>
-                  )}
 
-                  <button
-                    type="submit"
-                    disabled={submitting}
-                    className="w-full py-3 rounded-xl bg-accent text-black text-sm font-bold flex items-center justify-center gap-2 shadow-glow hover:opacity-90 disabled:opacity-45 transition-opacity"
-                  >
-                    {submitting ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        Connexion en cours…
-                      </>
-                    ) : (
-                      'Se connecter'
+                    {showManualJson && (
+                      <textarea
+                        rows={3}
+                        value={qrRawText}
+                        onChange={(e) => {
+                          setQrRawText(e.target.value);
+                          const parsed = tryParseQrPayload(e.target.value);
+                          if (parsed) setQrData(parsed);
+                        }}
+                        placeholder='{"jeton":"...","login":"...","url":"https://..."}'
+                        className="w-full p-3 rounded-xl bg-[#08080D] border border-white/[0.1] text-xs font-mono text-zinc-200 focus:outline-none focus:border-accent"
+                      />
                     )}
-                  </button>
-                </form>
+                  </div>
+                ) : (
+                  <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-emerald-200">
+                          QR Code PRONOTE prêt !
+                        </div>
+                        <div className="text-[11px] text-emerald-300/80 truncate">
+                          {qrData.url.replace(/^https?:\/\//, '')}
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQrData(null);
+                        setQrRawText('');
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-white/[0.06] text-[11px] text-zinc-300 hover:text-white shrink-0"
+                    >
+                      Changer
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* 4-digit PIN */}
+              <div>
+                <label className="block text-xs font-medium text-zinc-300 mb-1.5">
+                  Code PIN à 4 chiffres choisi sur PRONOTE
+                </label>
+                <input
+                  ref={pinInputRef}
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={4}
+                  value={pin}
+                  onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                  placeholder="Ex : 0000"
+                  className="w-full px-3.5 py-2.5 rounded-xl bg-[#08080D] border border-white/[0.1] text-sm text-white tracking-[0.3em] font-semibold focus:outline-none focus:border-accent"
+                />
+              </div>
+
+              {error && (
+                <div className="p-3 rounded-xl bg-rose-500/12 border border-rose-500/30 text-xs text-rose-200 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{error}</span>
+                </div>
               )}
-            </>
+
+              <button
+                type="submit"
+                disabled={submitting || !qrData || pin.length !== 4}
+                className="w-full py-3 rounded-xl bg-accent text-black text-sm font-bold flex items-center justify-center gap-2 shadow-glow hover:opacity-90 disabled:opacity-45 transition-opacity"
+              >
+                {submitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Connexion en cours…
+                  </>
+                ) : (
+                  'Se connecter à mon PRONOTE'
+                )}
+              </button>
+            </form>
+          ) : (
+            /* ===== STEP 2B: NON-ENT SCHOOL -> DIRECT CREDENTIALS ===== */
+            <form onSubmit={handleCredsSubmit} className="space-y-4">
+              <div className="flex items-center justify-between gap-2 pb-3 border-b border-white/[0.07]">
+                <button
+                  type="button"
+                  onClick={resetToPicker}
+                  className="inline-flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white transition-colors"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>Changer</span>
+                </button>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <KeyRound className="w-3.5 h-3.5 text-accent shrink-0" />
+                  <span className="text-xs font-bold text-white truncate">
+                    {selectedSchool?.name}
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-zinc-300 mb-1.5">
+                    Identifiant élève
+                  </label>
+                  <input
+                    type="text"
+                    autoFocus
+                    autoComplete="username"
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder="Identifiant"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-[#08080D] border border-white/[0.1] text-xs text-white focus:outline-none focus:border-accent"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-zinc-300 mb-1.5">
+                    Mot de passe
+                  </label>
+                  <input
+                    type="password"
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-[#08080D] border border-white/[0.1] text-xs text-white focus:outline-none focus:border-accent"
+                  />
+                </div>
+              </div>
+
+              {error && (
+                <div
+                  className={`p-3.5 rounded-xl border text-xs space-y-2.5 ${
+                    error.startsWith('ENT_REQUIRED::')
+                      ? 'bg-amber-500/12 border-amber-400/35 text-amber-100'
+                      : 'bg-rose-500/12 border-rose-500/30 text-rose-200'
+                  }`}
+                >
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span className="leading-relaxed">
+                      {error.replace(/^ENT_REQUIRED::/, '')}
+                    </span>
+                  </div>
+                  {error.startsWith('ENT_REQUIRED::') && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStep('ent-qr');
+                        setError(null);
+                      }}
+                      className="w-full py-2 px-3 rounded-lg bg-accent text-black font-bold text-xs flex items-center justify-center gap-1.5 hover:opacity-90"
+                    >
+                      <QrCode className="w-3.5 h-3.5" />
+                      Passer sur la connexion QR Code (ENT)
+                    </button>
+                  )}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={submitting}
+                className="w-full py-3 rounded-xl bg-accent text-black text-sm font-bold flex items-center justify-center gap-2 shadow-glow hover:opacity-90 disabled:opacity-45 transition-opacity"
+              >
+                {submitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Connexion en cours…
+                  </>
+                ) : (
+                  'Se connecter'
+                )}
+              </button>
+
+              <div className="text-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setError(null);
+                    setStep('ent-qr');
+                  }}
+                  className="text-[11px] text-zinc-500 hover:text-zinc-300 underline underline-offset-2"
+                >
+                  Ou me connecter par QR Code PRONOTE
+                </button>
+              </div>
+            </form>
           )}
         </div>
 
@@ -788,7 +969,7 @@ export const WebLoginView: React.FC<WebLoginViewProps> = ({ onAuthenticated }) =
             <div className="min-w-0">
               <div className="text-xs font-bold text-white">Télécharger Noctis</div>
               <div className="text-[11px] text-zinc-400">
-                Apps Windows (.exe) & Android (.apk) avec connexion ENT & mode hors ligne
+                Windows (.exe) & Android (.apk) avec connexion ENT automatique & mode hors ligne
               </div>
             </div>
           </a>
@@ -818,7 +999,10 @@ export const WebLoginView: React.FC<WebLoginViewProps> = ({ onAuthenticated }) =
           <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
             <span>Client open-source non affilié à Index-Éducation (PRONOTE®)</span>
             <span>·</span>
-            <a href="./legal.html" className="text-zinc-300 hover:text-white underline underline-offset-2">
+            <a
+              href="./legal.html"
+              className="text-zinc-300 hover:text-white underline underline-offset-2"
+            >
               Mentions légales & Confidentialité
             </a>
             <span>·</span>

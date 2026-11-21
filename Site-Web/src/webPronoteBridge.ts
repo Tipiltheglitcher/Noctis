@@ -1314,6 +1314,35 @@ class WebPronoteBridge {
   }
 }
 
+export interface WebSchoolInstanceInfo {
+  name: string;
+  url: string;
+  casURL?: string;
+  casHost?: string;
+  eleveUrl: string;
+}
+
+export async function inspectWebPronoteInstance(rawUrl: string): Promise<WebSchoolInstanceInfo> {
+  const cleaned = cleanURL(rawUrl);
+  const fetcher = createRelayFetcher();
+  const info = await instance(cleaned, fetcher);
+  let casHost: string | undefined;
+  if (info.casURL) {
+    try {
+      casHost = new URL(info.casURL).hostname;
+    } catch {
+      casHost = info.casURL;
+    }
+  }
+  return {
+    name: info.name || cleaned,
+    url: cleaned,
+    casURL: info.casURL,
+    casHost,
+    eleveUrl: `${cleaned.replace(/\/$/, '')}/eleve.html`,
+  };
+}
+
 export function installWebPronoteBridge(): void {
   const bridge = new WebPronoteBridge();
   window.pronoteAPI = bridge.createAPI();
