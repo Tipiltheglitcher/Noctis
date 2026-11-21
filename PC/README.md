@@ -1,22 +1,20 @@
-# Noctis
+# Noctis (Windows PC)
 
-Application de bureau Windows (`.exe`) moderne et sombre pour votre espace scolaire PRONOTE, avec connexion **ENT / Lycée Connecté (ÉduConnect)** et **QR Code (+ PIN)**.
+Application de bureau Windows (`.exe`) moderne et sombre pour **PRONOTE**, avec connexion **ENT (tous établissements)**, **QR Code (+ PIN)**, mode hors ligne et mises à jour automatiques.
 
 ## Fonctionnalités
 
-- **Connexion Lycée Connecté automatique** : ouvre directement ÉduConnect (ou l'écran de connexion Lycée Connecté), détecte automatiquement votre établissement PRONOTE après connexion et récupère votre session.
-- **Recherche d'établissement** : recherche par ville, code postal, nom du lycée ou URL PRONOTE.
-- **Connexion QR Code** : collez directement une capture d'écran (`Win+Shift+S` puis `Ctrl+V`), glissez une image ou scannez à la webcam + code PIN à 4 chiffres.
-- **Session persistante chiffrée** : le jeton de connexion est chiffré localement via Windows DPAPI (`safeStorage`).
-- **Tableau de bord, Emploi du temps, Devoirs, Notes + Simulateur de moyenne, Vie scolaire, Infos & Messagerie, Cantine**.
-- **Style Obsidian Noir** : 4 couleurs d'accentuation et notifications Windows.
+- **Connexion universelle** : recherche d'établissement via l'annuaire officiel de l'Éducation nationale, connexion ENT intégrée, QR Code PRONOTE (`Win+Shift+S` + `Ctrl+V` / webcam) ou identifiants directs.
+- **Session persistante chiffrée & Mode hors ligne** : jeton chiffré localement via Windows DPAPI (`safeStorage`) et cache local persistant.
+- **Tableau de bord, Emploi du temps, Devoirs, Notes + Simulateur de moyenne, Vie scolaire, Infos & Sondages, Discussions, Cantine (Midi/Soir)**.
+- **Studio de personnalisation** : couleurs libres (HEX / sélecteur), 5 fonds sombres, formes, styles de cartes, disposition et notifications Windows.
 
-## Lancer ou recompiler
+## Développement & Compilation
 
 ```bash
 # Mode développement
 npm run dev
 
-# Générer les exécutables Windows (Portable + Setup) dans release/
+# Générer l'installeur Windows (Noctis-*-Setup.exe) dans release/
 npm run dist
 ```

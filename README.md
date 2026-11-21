@@ -1,23 +1,27 @@
 # Noctis
 
-Application moderne en mode noir absolu pour **Windows (PC)** et **Android**, avec connexion **Lycée Connecté / ENT (ÉduConnect)** et **QR Code (+ PIN)**, et mises à jour automatiques via GitHub Releases.
+Client scolaire open-source, rapide et en noir absolu pour **PRONOTE**, disponible sur **Web** (PC, Mac, iPhone, Android), **Windows** et **Android**.
 
-- **Site de téléchargement (toujours à jour)** : https://tipiltheglitcher.github.io/Noctis/
-- **Toutes les versions (`.exe` + `.apk`)** : https://github.com/Tipiltheglitcher/Noctis/releases
+- **Noctis Web** : https://tipiltheglitcher.github.io/Noctis/
+- **Téléchargement Windows & Android** : https://tipiltheglitcher.github.io/Noctis/download.html
+- **Toutes les releases (`.exe` & `.apk`)** : https://github.com/Tipiltheglitcher/Noctis/releases
+- **Mentions légales & Confidentialité** : https://tipiltheglitcher.github.io/Noctis/legal.html
+
+## Fonctionnalités
+
+- **Connexion universelle** : recherche d'établissement sur l'annuaire officiel de l'Éducation nationale, connexion **ENT intégrée** (sur Windows & Android), **QR Code PRONOTE** et identifiants directs.
+- **Emploi du temps moderne** : cours en cours mis en valeur avec barre de progression, cours passés grisés, pause déjeuner identifiée et passage automatique au jour suivant une fois les cours terminés.
+- **Devoirs, Notes & Simulateur** : suivi des devoirs, moyennes par matière et simulateur de futures notes en direct.
+- **Infos, Sondages, Discussions & Cantine** : compatible PRONOTE 2026, affichage séparé Midi / Soir (Internat) et indicateur de Droit à la déconnexion.
+- **Mode hors ligne (PC & Android)** : consultation des dernières données sans connexion et resynchronisation automatique au retour du réseau.
+- **Studio de personnalisation** : couleurs personnalisées (HEX / sélecteur libre), 5 fonds sombres, formes, style de cartes, densité et disposition sur mesure.
 
 ## Structure du dépôt
 
-- `PC/` : Application Windows Electron + React + TypeScript (`Noctis-*-Setup.exe`)
-- `Mobile/` : Application Android Capacitor + React + WebView ENT native (`Noctis-*.apk`)
-- `Site-Web/` : Site vitrine & téléchargement déployé automatiquement sur GitHub Pages
-- `.github/workflows/` : Compilation automatique de Windows `.exe` + Android `.apk` à chaque tag `vX.Y.Z`, et déploiement automatique du site web.
+- `PC/` : Application Windows (Electron + React + TypeScript)
+- `Mobile/` : Application Android (Capacitor + React + TypeScript)
+- `Site-Web/` : Application Noctis Web, portail de téléchargement, mentions légales et relais CORS sans état (`cloudflare-worker/worker.js`)
 
-## Publier une nouvelle mise à jour (pour tes potes)
+## Confidentialité & Non-affiliation
 
-Depuis PowerShell à la racine (`D:\Script\app\pronote`) :
-
-```powershell
-.\scripts\publish-update.ps1 -Version "1.0.1" -Notes "Corrections et améliorations"
-```
-
-GitHub Actions compile automatiquement `Noctis-1.0.1-Setup.exe` et `Noctis-1.0.1.apk`, publie la Release, met à jour le site web, et **Noctis PC + Noctis Android proposent automatiquement la mise à jour au prochain démarrage** !
+Noctis est un projet indépendant open-source **non affilié à Index-Éducation (PRONOTE®)**. Aucun identifiant, mot de passe ou donnée scolaire n'est stocké sur un serveur distant.
