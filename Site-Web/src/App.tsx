@@ -426,7 +426,7 @@ export default function App() {
               <SettingsView
                 profile={profile}
                 settings={settings}
-                appVersion="Web 1.2.1"
+                appVersion="Web 1.3.0"
                 checkingUpdate={false}
                 updateFeedback="Tu utilises Noctis Web (toujours à jour). Pour la connexion ENT intégrée et le mode hors ligne, télécharge Noctis PC ou Android."
                 onCheckUpdates={() => {
