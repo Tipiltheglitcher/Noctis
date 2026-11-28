@@ -1440,6 +1440,7 @@ export const MobileGrades: React.FC<{
   const [simSub, setSimSub] = useState('');
   const [simVal, setSimVal] = useState('16');
   const [simOut, setSimOut] = useState('20');
+  const [simCoef, setSimCoef] = useState('1');
 
   const computed = useMemo(() => {
     const subjects = (grades?.subjectsAverages ?? []).map((sa) => {
@@ -1447,34 +1448,101 @@ export const MobileGrades: React.FC<{
       const extra = sims.filter((s) => s.subjectId === sa.subjectId);
       let avg = sa.student;
       if (extra.length > 0) {
+        const outOfBase = sa.outOf > 0 ? sa.outOf : 20;
+        const baseAvgOn20 =
+          sa.student !== undefined ? (sa.student / outOfBase) * 20 : undefined;
+
+        let realWeight = 0;
+        for (const g of real) {
+          if (g.value.kind !== 0 || g.outOf <= 0) continue;
+          if (g.isBonus) continue;
+          const gradeOn20 = (g.value.points / g.outOf) * 20;
+          if (g.isOptional && baseAvgOn20 !== undefined && gradeOn20 < baseAvgOn20) continue;
+          const scaleFactor = g.isOutOf20 === false ? g.outOf / 20 : 1;
+          realWeight += Math.max(0.01, (g.coefficient || 1) * scaleFactor);
+        }
+
         let sum = 0;
         let coef = 0;
-        for (const g of real) {
-          if (g.value.kind === 0 && g.outOf > 0) {
-            sum += (g.value.points / g.outOf) * 20 * (g.coefficient || 1);
-            coef += g.coefficient || 1;
-          }
-        }
-        if (coef === 0 && sa.student !== undefined) {
-          sum = sa.student;
-          coef = 1;
+        if (baseAvgOn20 !== undefined) {
+          const baseWeight = realWeight > 0 ? realWeight : 1;
+          sum = baseAvgOn20 * baseWeight;
+          coef = baseWeight;
         }
         for (const e of extra) {
-          sum += (e.val / e.outOf) * 20 * e.coef;
-          coef += e.coef;
+          if (e.outOf > 0 && e.coef > 0) {
+            sum += (e.val / e.outOf) * 20 * e.coef;
+            coef += e.coef;
+          }
         }
-        avg = coef > 0 ? sum / coef : sa.student;
+        const simOn20 = coef > 0 ? sum / coef : baseAvgOn20;
+        avg =
+          simOn20 !== undefined
+            ? Math.max(0, Math.min(outOfBase, (simOn20 / 20) * outOfBase))
+            : sa.student;
       }
-      return { ...sa, real, avg };
+      return { ...sa, real, extra, avg };
     });
 
-    const avgs = subjects.map((s) => s.avg).filter((v): v is number => v !== undefined);
-    const overall =
-      sims.length > 0 && avgs.length > 0
-        ? avgs.reduce((a, b) => a + b, 0) / avgs.length
-        : grades?.overallAverage;
+    let overall = grades?.overallAverage;
+    if (sims.length > 0) {
+      if (grades?.overallAverage !== undefined) {
+        const ratedReal = subjects.filter((s) => s.student !== undefined);
+        const newlyRated = subjects.filter(
+          (s) => s.student === undefined && s.avg !== undefined
+        );
+        const baseCount = Math.max(1, ratedReal.length);
+        let deltaSum = 0;
+        for (const s of ratedReal) {
+          if (s.avg !== undefined && s.student !== undefined) {
+            const outOfBase = s.outOf > 0 ? s.outOf : 20;
+            deltaSum += ((s.avg - s.student) / outOfBase) * 20;
+          }
+        }
+        const anchored = grades.overallAverage + deltaSum / baseCount;
+        if (newlyRated.length > 0) {
+          const extraSum = newlyRated.reduce((acc, s) => {
+            const outOfBase = s.outOf > 0 ? s.outOf : 20;
+            return acc + ((s.avg ?? 0) / outOfBase) * 20;
+          }, 0);
+          overall = Math.max(
+            0,
+            Math.min(20, (anchored * baseCount + extraSum) / (baseCount + newlyRated.length))
+          );
+        } else {
+          overall = Math.max(0, Math.min(20, anchored));
+        }
+      } else {
+        const avgs = subjects
+          .filter((s) => s.avg !== undefined)
+          .map((s) => {
+            const outOfBase = s.outOf > 0 ? s.outOf : 20;
+            return ((s.avg ?? 0) / outOfBase) * 20;
+          });
+        if (avgs.length > 0) {
+          overall = avgs.reduce((a, b) => a + b, 0) / avgs.length;
+        }
+      }
+    }
     return { subjects, overall };
   }, [grades, sims]);
+
+  const overallDelta =
+    sims.length > 0 &&
+    computed.overall !== undefined &&
+    grades?.overallAverage !== undefined
+      ? computed.overall - grades.overallAverage
+      : null;
+
+  const parsedOut = (() => {
+    const o = parseFloat(simOut.replace(',', '.'));
+    return !Number.isNaN(o) && o > 0 ? o : 20;
+  })();
+
+  const parsedVal = (() => {
+    const v = parseFloat(simVal.replace(',', '.'));
+    return !Number.isNaN(v) ? Math.max(0, Math.min(parsedOut, v)) : 0;
+  })();
 
   return (
     <div className="p-4 space-y-4">
@@ -1520,15 +1588,27 @@ export const MobileGrades: React.FC<{
           <div className="text-xs text-zinc-400">
             {sims.length > 0 ? 'Moyenne simulée' : 'Moyenne générale'}
           </div>
-          <div className="text-3xl font-extrabold tabular-nums mt-0.5">
+          <div className="flex items-baseline gap-1.5 mt-0.5 tabular-nums">
             <span
-              className={
+              className={`text-3xl font-extrabold ${
                 computed.overall !== undefined ? getGradeColorClass(computed.overall) : 'text-white'
-              }
+              }`}
             >
               {formatGradeNumber(computed.overall)}
             </span>
-            <span className="text-sm text-zinc-500 font-normal"> /20</span>
+            <span className="text-sm text-zinc-500 font-normal">/20</span>
+            {overallDelta !== null && (
+              <span
+                className={`ml-1 px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                  overallDelta >= 0
+                    ? 'bg-emerald-500/15 text-emerald-300'
+                    : 'bg-rose-500/15 text-rose-300'
+                }`}
+              >
+                {overallDelta >= 0 ? '+' : ''}
+                {overallDelta.toFixed(2).replace('.', ',')}
+              </span>
+            )}
           </div>
         </div>
         <div className="text-right text-xs text-zinc-400">
@@ -1538,17 +1618,22 @@ export const MobileGrades: React.FC<{
       </div>
 
       {simOpen && (
-        <div className="p-3.5 rounded-2xl bg-[#11111C] border border-accent/30 space-y-2.5">
+        <div className="p-4 rounded-2xl bg-[#11111C] border border-accent/35 space-y-3.5">
           <div className="flex items-center justify-between text-xs">
-            <span className="font-semibold text-accent flex items-center gap-1">
-              <Sparkles className="w-3.5 h-3.5" /> Simulateur de note
+            <span className="font-semibold text-accent flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5" /> Simulateur de moyenne
             </span>
             {sims.length > 0 && (
-              <button onClick={() => setSims([])} className="text-rose-400">
-                Effacer
+              <button
+                type="button"
+                onClick={() => setSims([])}
+                className="text-[11px] font-semibold text-rose-400"
+              >
+                Tout effacer
               </button>
             )}
           </div>
+
           <MobileSelectSheet
             title="Choisir une matière"
             value={simSub || computed.subjects[0]?.subjectId || ''}
@@ -1557,48 +1642,129 @@ export const MobileGrades: React.FC<{
               value: s.subjectId,
               label: s.subject,
               subtitle:
-                s.avg !== undefined ? `Moyenne actuelle : ${formatGradeNumber(s.avg)}/${s.outOf}` : undefined,
+                s.avg !== undefined
+                  ? `Moyenne actuelle : ${formatGradeNumber(s.avg)}/${s.outOf}`
+                  : 'Aucune note pour le moment',
               colorDot: normalizeHexColor(s.backgroundColor),
             }))}
             onChange={(val) => setSimSub(val)}
           />
-          <div className="flex gap-2">
+
+          {/* Quick Interactive Grade Slider */}
+          <div className="space-y-1.5 px-0.5">
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="text-zinc-400">Ajuster la note</span>
+              <span className="font-bold text-white tabular-nums">
+                {simVal || '0'} / {simOut || '20'}
+              </span>
+            </div>
             <input
-              value={simVal}
-              onChange={(e) => setSimVal(e.target.value)}
-              placeholder="Note"
-              className="w-20 px-2 py-2 rounded-xl bg-[#09090F] border border-white/[0.08] text-xs text-center text-white"
+              type="range"
+              min={0}
+              max={parsedOut}
+              step={0.5}
+              value={parsedVal}
+              onChange={(e) => setSimVal(e.target.value.replace('.', ','))}
+              className="w-full accent-[rgb(var(--accent-rgb))] h-2 rounded-lg cursor-pointer"
             />
-            <input
-              value={simOut}
-              onChange={(e) => setSimOut(e.target.value)}
-              placeholder="/20"
-              className="w-20 px-2 py-2 rounded-xl bg-[#09090F] border border-white/[0.08] text-xs text-center text-white"
-            />
-            <button
-              onClick={() => {
-                const sub =
-                  computed.subjects.find((s) => s.subjectId === simSub) || computed.subjects[0];
-                const v = parseFloat(simVal.replace(',', '.'));
-                const o = parseFloat(simOut.replace(',', '.'));
-                if (!sub || Number.isNaN(v) || Number.isNaN(o) || o <= 0) return;
-                setSims((p) => [
-                  ...p,
-                  { id: `${Date.now()}`, subjectId: sub.subjectId, subject: sub.subject, val: v, outOf: o, coef: 1 },
-                ]);
-              }}
-              className="flex-1 rounded-xl bg-accent text-black text-xs font-bold flex items-center justify-center gap-1"
-            >
-              <Plus className="w-3.5 h-3.5" /> Ajouter
-            </button>
           </div>
+
+          {/* Explicit Labeled Decimal Inputs (Note / Sur / Coeff) */}
+          <div className="grid grid-cols-3 gap-2">
+            <label className="space-y-1">
+              <span className="text-[10.5px] text-zinc-400 font-medium block">Note</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={simVal}
+                onFocus={(e) => e.currentTarget.select()}
+                onChange={(e) => setSimVal(e.target.value)}
+                placeholder="16"
+                className="w-full px-2.5 py-2.5 rounded-xl bg-[#09090F] border border-white/[0.12] focus:border-accent/60 focus:outline-none text-sm font-bold text-center text-white tabular-nums"
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="text-[10.5px] text-zinc-400 font-medium block">Sur</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={simOut}
+                onFocus={(e) => e.currentTarget.select()}
+                onChange={(e) => setSimOut(e.target.value)}
+                placeholder="20"
+                className="w-full px-2.5 py-2.5 rounded-xl bg-[#09090F] border border-white/[0.12] focus:border-accent/60 focus:outline-none text-sm font-semibold text-center text-white tabular-nums"
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="text-[10.5px] text-zinc-400 font-medium block">Coeff</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={simCoef}
+                onFocus={(e) => e.currentTarget.select()}
+                onChange={(e) => setSimCoef(e.target.value)}
+                placeholder="1"
+                className="w-full px-2.5 py-2.5 rounded-xl bg-[#09090F] border border-white/[0.12] focus:border-accent/60 focus:outline-none text-sm font-semibold text-center text-white tabular-nums"
+              />
+            </label>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              const sub =
+                computed.subjects.find((s) => s.subjectId === simSub) || computed.subjects[0];
+              const v = parseFloat(simVal.replace(',', '.'));
+              const o = parseFloat(simOut.replace(',', '.'));
+              const c = parseFloat(simCoef.replace(',', '.'));
+              if (
+                !sub ||
+                Number.isNaN(v) ||
+                Number.isNaN(o) ||
+                Number.isNaN(c) ||
+                o <= 0 ||
+                c <= 0
+              ) {
+                return;
+              }
+              const clampedVal = Math.max(0, Math.min(o, v));
+              setSims((p) => [
+                ...p,
+                {
+                  id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                  subjectId: sub.subjectId,
+                  subject: sub.subject,
+                  val: clampedVal,
+                  outOf: o,
+                  coef: c,
+                },
+              ]);
+            }}
+            className="w-full py-2.5 rounded-xl bg-accent text-black text-xs font-bold flex items-center justify-center gap-1.5 active:scale-[0.99] transition-transform"
+          >
+            <Plus className="w-4 h-4" /> Ajouter la note simulée
+          </button>
+
           {sims.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-wrap gap-1.5 pt-1">
               {sims.map((s) => (
-                <span key={s.id} className="px-2 py-1 rounded-lg bg-accent/15 text-[11px] text-white inline-flex items-center gap-1.5">
-                  {s.subject}: {s.val}/{s.outOf}
-                  <button onClick={() => setSims((p) => p.filter((x) => x.id !== s.id))}>
-                    <Trash2 className="w-3 h-3 text-rose-400" />
+                <span
+                  key={s.id}
+                  className="px-2.5 py-1.5 rounded-xl bg-accent/15 border border-accent/25 text-[11px] text-white inline-flex items-center gap-1.5"
+                >
+                  <span className="truncate max-w-[140px]">{s.subject}</span>
+                  <strong className="text-accent tabular-nums">
+                    {String(s.val).replace('.', ',')}/{s.outOf}
+                  </strong>
+                  {s.coef !== 1 && (
+                    <span className="text-zinc-400 text-[10px]">(c.{s.coef})</span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setSims((p) => p.filter((x) => x.id !== s.id))}
+                    className="ml-0.5"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-rose-400" />
                   </button>
                 </span>
               ))}
@@ -1609,52 +1775,96 @@ export const MobileGrades: React.FC<{
 
       {/* Subjects */}
       <div className="space-y-2.5">
-        {computed.subjects.map((sa) => (
-          <div key={sa.subjectId} className="rounded-2xl bg-[#0D0D14] border border-white/[0.06] overflow-hidden">
-            <div className="px-4 py-3 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 min-w-0">
-                <span
-                  className="w-2.5 h-2.5 rounded-full shrink-0"
-                  style={{ backgroundColor: normalizeHexColor(sa.backgroundColor) }}
-                />
-                <span className="text-sm font-semibold text-white truncate">{sa.subject}</span>
+        {computed.subjects.map((sa) => {
+          const subjectDelta =
+            sa.extra.length > 0 && sa.avg !== undefined && sa.student !== undefined
+              ? sa.avg - sa.student
+              : null;
+          return (
+            <div key={sa.subjectId} className="rounded-2xl bg-[#0D0D14] border border-white/[0.06] overflow-hidden">
+              <div className="px-4 py-3 flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span
+                    className="w-2.5 h-2.5 rounded-full shrink-0"
+                    style={{ backgroundColor: normalizeHexColor(sa.backgroundColor) }}
+                  />
+                  <span className="text-sm font-semibold text-white truncate">{sa.subject}</span>
+                </div>
+                <div className="flex items-center gap-1.5 text-sm font-bold tabular-nums shrink-0">
+                  {subjectDelta !== null && Math.abs(subjectDelta) >= 0.005 && (
+                    <span
+                      className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                        subjectDelta >= 0
+                          ? 'bg-emerald-500/15 text-emerald-300'
+                          : 'bg-rose-500/15 text-rose-300'
+                      }`}
+                    >
+                      {subjectDelta >= 0 ? '+' : ''}
+                      {subjectDelta.toFixed(2).replace('.', ',')}
+                    </span>
+                  )}
+                  <div>
+                    <span className={sa.avg !== undefined ? getGradeColorClass(sa.avg) : 'text-zinc-400'}>
+                      {formatGradeNumber(sa.avg)}
+                    </span>
+                    <span className="text-xs text-zinc-500">/{sa.outOf}</span>
+                  </div>
+                </div>
               </div>
-              <div className="text-sm font-bold tabular-nums shrink-0">
-                <span className={sa.avg !== undefined ? getGradeColorClass(sa.avg) : 'text-zinc-400'}>
-                  {formatGradeNumber(sa.avg)}
-                </span>
-                <span className="text-xs text-zinc-500">/{sa.outOf}</span>
-              </div>
-            </div>
-            {sa.real.length > 0 && (
-              <div className="border-t border-white/[0.05] divide-y divide-white/[0.04] bg-[#09090E]">
-                {sa.real.map((g) => (
-                  <div key={g.id} className="px-4 py-2.5 flex items-center justify-between gap-2 text-xs">
-                    <div className="min-w-0">
-                      <div className="text-zinc-200 truncate">{g.comment || 'Évaluation'}</div>
-                      <div className="text-[10.5px] text-zinc-500">
-                        {formatDateShort(g.date)} · Coeff {g.coefficient}
-                        {g.average !== undefined ? ` · Classe ${formatGradeNumber(g.average)}` : ''}
+              {(sa.real.length > 0 || sa.extra.length > 0) && (
+                <div className="border-t border-white/[0.05] divide-y divide-white/[0.04] bg-[#09090E]">
+                  {sa.extra.map((sg) => (
+                    <div
+                      key={sg.id}
+                      className="px-4 py-2.5 flex items-center justify-between gap-2 text-xs bg-accent/[0.06]"
+                    >
+                      <div className="flex items-center gap-1.5 min-w-0 text-accent font-medium">
+                        <Sparkles className="w-3.5 h-3.5 shrink-0" />
+                        <span className="truncate">
+                          Note simulée · Coeff {String(sg.coef).replace('.', ',')}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="font-bold text-accent tabular-nums">
+                          {String(sg.val).replace('.', ',')}/{sg.outOf}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setSims((p) => p.filter((x) => x.id !== sg.id))}
+                        >
+                          <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                        </button>
                       </div>
                     </div>
-                    <div className="font-bold tabular-nums shrink-0">
-                      <span
-                        className={
-                          g.value.kind === 0
-                            ? getGradeColorClass((g.value.points / (g.outOf || 20)) * 20)
-                            : 'text-zinc-400'
-                        }
-                      >
-                        {g.value.label}
-                      </span>
-                      {g.value.kind === 0 && <span className="text-[10.5px] text-zinc-500">/{g.outOf}</span>}
+                  ))}
+                  {sa.real.map((g) => (
+                    <div key={g.id} className="px-4 py-2.5 flex items-center justify-between gap-2 text-xs">
+                      <div className="min-w-0">
+                        <div className="text-zinc-200 truncate">{g.comment || 'Évaluation'}</div>
+                        <div className="text-[10.5px] text-zinc-500">
+                          {formatDateShort(g.date)} · Coeff {g.coefficient}
+                          {g.average !== undefined ? ` · Classe ${formatGradeNumber(g.average)}` : ''}
+                        </div>
+                      </div>
+                      <div className="font-bold tabular-nums shrink-0">
+                        <span
+                          className={
+                            g.value.kind === 0
+                              ? getGradeColorClass((g.value.points / (g.outOf || 20)) * 20)
+                              : 'text-zinc-400'
+                          }
+                        >
+                          {g.value.label}
+                        </span>
+                        {g.value.kind === 0 && <span className="text-[10.5px] text-zinc-500">/{g.outOf}</span>}
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

@@ -1071,6 +1071,7 @@ class MobilePronoteService {
             commentaireSurNote: g.commentaireSurNote,
             isBonus: g.isBonus,
             isOptional: g.isOptional,
+            isOutOf20: g.isOutOf20,
             subjectFile: g.subjectFile ? this.mapAttachment(g.subjectFile) : undefined,
             correctionFile: g.correctionFile ? this.mapAttachment(g.correctionFile) : undefined,
           }))

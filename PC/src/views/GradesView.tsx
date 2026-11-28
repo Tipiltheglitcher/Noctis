@@ -82,28 +82,38 @@ export const GradesView: React.FC<GradesViewProps> = ({
 
       let displayAvg = sa.student;
       if (sims.length > 0) {
+        const outOfBase = sa.outOf > 0 ? sa.outOf : 20;
+        const baseAvgOn20 =
+          sa.student !== undefined ? (sa.student / outOfBase) * 20 : undefined;
+
+        let realWeight = 0;
+        for (const g of realList) {
+          if (g.value.kind !== 0 || g.outOf <= 0) continue;
+          if (g.isBonus) continue;
+          const gradeOn20 = (g.value.points / g.outOf) * 20;
+          if (g.isOptional && baseAvgOn20 !== undefined && gradeOn20 < baseAvgOn20) continue;
+          const scaleFactor = g.isOutOf20 === false ? g.outOf / 20 : 1;
+          realWeight += Math.max(0.01, (g.coefficient || 1) * scaleFactor);
+        }
+
         let weightedSum = 0;
         let coeffSum = 0;
-        for (const g of realList) {
-          if (g.value.kind === 0 && g.outOf > 0) {
-            const on20 = (g.value.points / g.outOf) * 20;
-            weightedSum += on20 * (g.coefficient || 1);
-            coeffSum += g.coefficient || 1;
-          }
-        }
-        // Fallback if subject has an official average but no individual grade breakdown
-        if (coeffSum === 0 && sa.student !== undefined) {
-          weightedSum = sa.student;
-          coeffSum = 1;
+        if (baseAvgOn20 !== undefined) {
+          // Anchor to PRONOTE's exact subject average so adding a higher grade always increases it
+          const baseWeight = realWeight > 0 ? realWeight : 1;
+          weightedSum = baseAvgOn20 * baseWeight;
+          coeffSum = baseWeight;
         }
         for (const sg of sims) {
-          if (sg.outOf > 0) {
+          if (sg.outOf > 0 && sg.coefficient > 0) {
             const on20 = (sg.value / sg.outOf) * 20;
-            weightedSum += on20 * (sg.coefficient || 1);
-            coeffSum += sg.coefficient || 1;
+            weightedSum += on20 * sg.coefficient;
+            coeffSum += sg.coefficient;
           }
         }
-        displayAvg = coeffSum > 0 ? weightedSum / coeffSum : sa.student;
+        const simOn20 = coeffSum > 0 ? weightedSum / coeffSum : baseAvgOn20;
+        displayAvg =
+          simOn20 !== undefined ? Math.max(0, Math.min(outOfBase, (simOn20 / 20) * outOfBase)) : sa.student;
       }
 
       return {
@@ -114,14 +124,48 @@ export const GradesView: React.FC<GradesViewProps> = ({
       };
     });
 
-    const validAvgs = enrichedSubjects
-      .map((s) => s.simulatedAverage)
-      .filter((v): v is number => v !== undefined);
-
-    const simulatedOverall =
-      simGrades.length > 0 && validAvgs.length > 0
-        ? validAvgs.reduce((acc, v) => acc + v, 0) / validAvgs.length
-        : grades?.overallAverage;
+    let simulatedOverall = grades?.overallAverage;
+    if (simGrades.length > 0) {
+      if (grades?.overallAverage !== undefined) {
+        const ratedReal = enrichedSubjects.filter((s) => s.student !== undefined);
+        const newlyRated = enrichedSubjects.filter(
+          (s) => s.student === undefined && s.simulatedAverage !== undefined
+        );
+        const baseCount = Math.max(1, ratedReal.length);
+        let deltaSum = 0;
+        for (const s of ratedReal) {
+          if (s.simulatedAverage !== undefined && s.student !== undefined) {
+            const outOfBase = s.outOf > 0 ? s.outOf : 20;
+            const realOn20 = (s.student / outOfBase) * 20;
+            const simOn20 = (s.simulatedAverage / outOfBase) * 20;
+            deltaSum += simOn20 - realOn20;
+          }
+        }
+        const anchored = grades.overallAverage + deltaSum / baseCount;
+        if (newlyRated.length > 0) {
+          const extraSum = newlyRated.reduce((acc, s) => {
+            const outOfBase = s.outOf > 0 ? s.outOf : 20;
+            return acc + ((s.simulatedAverage ?? 0) / outOfBase) * 20;
+          }, 0);
+          simulatedOverall = Math.max(
+            0,
+            Math.min(20, (anchored * baseCount + extraSum) / (baseCount + newlyRated.length))
+          );
+        } else {
+          simulatedOverall = Math.max(0, Math.min(20, anchored));
+        }
+      } else {
+        const validAvgs = enrichedSubjects
+          .filter((s) => s.simulatedAverage !== undefined)
+          .map((s) => {
+            const outOfBase = s.outOf > 0 ? s.outOf : 20;
+            return ((s.simulatedAverage ?? 0) / outOfBase) * 20;
+          });
+        if (validAvgs.length > 0) {
+          simulatedOverall = validAvgs.reduce((acc, v) => acc + v, 0) / validAvgs.length;
+        }
+      }
+    }
 
     return { enrichedSubjects, simulatedOverall };
   }, [grades, simGrades]);
@@ -372,43 +416,61 @@ export const GradesView: React.FC<GradesViewProps> = ({
             )}
           </div>
 
-          <form onSubmit={addSimulatedGrade} className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
-            <select
-              value={simSubjectId || computed.enrichedSubjects[0]?.subjectId || ''}
-              onChange={(e) => setSimSubjectId(e.target.value)}
-              className="sm:col-span-5 px-3 py-2 rounded-xl bg-[#09090E] border border-white/[0.08] text-xs text-white focus:border-accent/60 focus:outline-none"
-            >
-              {computed.enrichedSubjects.map((s) => (
-                <option key={s.subjectId} value={s.subjectId}>
-                  {s.subject}
-                </option>
-              ))}
-            </select>
+          <form onSubmit={addSimulatedGrade} className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end">
+            <label className="sm:col-span-5 space-y-1">
+              <span className="text-[10.5px] text-zinc-400 font-medium block">Matière</span>
+              <select
+                value={simSubjectId || computed.enrichedSubjects[0]?.subjectId || ''}
+                onChange={(e) => setSimSubjectId(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-[#09090E] border border-white/[0.08] text-xs text-white focus:border-accent/60 focus:outline-none"
+              >
+                {computed.enrichedSubjects.map((s) => (
+                  <option key={s.subjectId} value={s.subjectId}>
+                    {s.subject}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-            <input
-              type="text"
-              value={simValue}
-              onChange={(e) => setSimValue(e.target.value)}
-              placeholder="Note (ex: 16)"
-              className="sm:col-span-2 px-3 py-2 rounded-xl bg-[#09090E] border border-white/[0.08] text-xs text-white text-center tabular-nums focus:border-accent/60 focus:outline-none"
-            />
-            <input
-              type="text"
-              value={simOutOf}
-              onChange={(e) => setSimOutOf(e.target.value)}
-              placeholder="Sur (20)"
-              className="sm:col-span-2 px-3 py-2 rounded-xl bg-[#09090E] border border-white/[0.08] text-xs text-white text-center tabular-nums focus:border-accent/60 focus:outline-none"
-            />
-            <input
-              type="text"
-              value={simCoeff}
-              onChange={(e) => setSimCoeff(e.target.value)}
-              placeholder="Coeff (1)"
-              className="sm:col-span-1 px-2 py-2 rounded-xl bg-[#09090E] border border-white/[0.08] text-xs text-white text-center tabular-nums focus:border-accent/60 focus:outline-none"
-            />
+            <label className="sm:col-span-2 space-y-1">
+              <span className="text-[10.5px] text-zinc-400 font-medium block">Note</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={simValue}
+                onFocus={(e) => e.currentTarget.select()}
+                onChange={(e) => setSimValue(e.target.value)}
+                placeholder="ex: 16"
+                className="w-full px-3 py-2 rounded-xl bg-[#09090E] border border-white/[0.08] text-xs text-white text-center tabular-nums focus:border-accent/60 focus:outline-none"
+              />
+            </label>
+            <label className="sm:col-span-2 space-y-1">
+              <span className="text-[10.5px] text-zinc-400 font-medium block">Sur</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={simOutOf}
+                onFocus={(e) => e.currentTarget.select()}
+                onChange={(e) => setSimOutOf(e.target.value)}
+                placeholder="20"
+                className="w-full px-3 py-2 rounded-xl bg-[#09090E] border border-white/[0.08] text-xs text-white text-center tabular-nums focus:border-accent/60 focus:outline-none"
+              />
+            </label>
+            <label className="sm:col-span-1 space-y-1">
+              <span className="text-[10.5px] text-zinc-400 font-medium block">Coeff</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={simCoeff}
+                onFocus={(e) => e.currentTarget.select()}
+                onChange={(e) => setSimCoeff(e.target.value)}
+                placeholder="1"
+                className="w-full px-2 py-2 rounded-xl bg-[#09090E] border border-white/[0.08] text-xs text-white text-center tabular-nums focus:border-accent/60 focus:outline-none"
+              />
+            </label>
             <button
               type="submit"
-              className="sm:col-span-2 px-3 py-2 rounded-xl bg-accent text-black font-semibold text-xs flex items-center justify-center gap-1 hover:opacity-90"
+              className="sm:col-span-2 h-[34px] px-3 rounded-xl bg-accent text-black font-semibold text-xs flex items-center justify-center gap-1 hover:opacity-90"
             >
               <Plus className="w-3.5 h-3.5" />
               Ajouter

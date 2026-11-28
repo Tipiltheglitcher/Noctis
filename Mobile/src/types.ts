@@ -169,6 +169,7 @@ export interface GradeDTO {
   commentaireSurNote?: string;
   isBonus: boolean;
   isOptional: boolean;
+  isOutOf20?: boolean;
   subjectFile?: AttachmentDTO;
   correctionFile?: AttachmentDTO;
 }
