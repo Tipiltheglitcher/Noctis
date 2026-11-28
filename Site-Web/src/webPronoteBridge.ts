@@ -550,6 +550,11 @@ class WebPronoteBridge {
       },
       gradePeriods: this.mapPeriods(TabLocation.Grades),
       attendancePeriods: this.mapPeriods(TabLocation.Notebook),
+      holidays: (s.instance.holidays ?? []).map((h) => ({
+        name: h.name,
+        startDate: h.startDate.toISOString(),
+        endDate: h.endDate.toISOString(),
+      })),
     };
     this.profileCache = profile;
     return profile;

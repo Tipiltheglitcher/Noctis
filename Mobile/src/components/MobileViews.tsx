@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   MapPin,
@@ -30,7 +32,6 @@ import {
   AlertCircle,
   UtensilsCrossed,
   Coffee,
-  MoonStar,
   LayoutGrid,
   Layers,
   RotateCcw,
@@ -38,6 +39,8 @@ import {
   Type,
   CalendarDays,
   Eye,
+  EyeOff,
+  Info,
   Pipette,
 } from 'lucide-react';
 import type {
@@ -50,6 +53,7 @@ import type {
   DiscussionThreadDTO,
   FontScale,
   GradesOverviewDTO,
+  HolidayDTO,
   HomeworkDTO,
   LessonDetailsDTO,
   MealDTO,
@@ -107,37 +111,241 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
+const MOBILE_RTD_DISMISS_KEY = 'noctis_mobile_rtd_dismissed';
+
+function readMobileRtdDismissed(): string | null {
+  try {
+    return sessionStorage.getItem(MOBILE_RTD_DISMISS_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeMobileRtdDismissed(key: string): void {
+  try {
+    sessionStorage.setItem(MOBILE_RTD_DISMISS_KEY, key);
+  } catch {
+    // ignore
+  }
+}
+
 const MobileRightToDisconnectNote: React.FC<{
-  serverDisabled?: boolean;
-  onlyWhenActive?: boolean;
-}> = ({ serverDisabled = false, onlyWhenActive = false }) => {
+  holidays?: HolidayDTO[];
+}> = ({ holidays }) => {
   const [now, setNow] = useState(() => new Date());
+  const [expanded, setExpanded] = useState(false);
+  const [dismissedKey, setDismissedKey] = useState<string | null>(() => readMobileRtdDismissed());
+
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 60_000);
     return () => clearInterval(id);
   }, []);
-  const info = getRightToDisconnectInfo(now, serverDisabled);
-  if (onlyWhenActive && !info.active) return null;
 
-  if (info.active) {
-    return (
-      <div className="rounded-2xl bg-indigo-500/[0.09] border border-indigo-400/25 p-3 flex items-start gap-2.5">
-        <div className="w-7 h-7 rounded-lg bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center text-indigo-300 shrink-0 mt-0.5">
-          <MoonStar className="w-3.5 h-3.5" />
-        </div>
-        <div className="min-w-0 text-[11.5px] leading-relaxed">
-          <div className="font-semibold text-indigo-200">{info.title}</div>
-          <p className="text-indigo-200/75 mt-0.5">{info.description}</p>
-        </div>
-      </div>
-    );
-  }
+  const info = getRightToDisconnectInfo(now, holidays);
+  if (!info.active || dismissedKey === info.windowKey) return null;
+
+  const handleDismiss = () => {
+    writeMobileRtdDismissed(info.windowKey);
+    setDismissedKey(info.windowKey);
+  };
 
   return (
-    <div className="rounded-xl bg-white/[0.025] border border-white/[0.06] px-3 py-2 flex items-start gap-2 text-[11px] text-zinc-400 leading-relaxed">
-      <MoonStar className="w-3.5 h-3.5 text-indigo-400/80 shrink-0 mt-0.5" />
-      <span>{info.description}</span>
+    <div className="rounded-2xl bg-sky-500/[0.09] border border-sky-400/25 p-3 text-sky-100/90 space-y-2.5">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-start gap-2 min-w-0">
+          <div className="w-6 h-6 rounded-lg bg-sky-500/20 border border-sky-400/30 flex items-center justify-center text-sky-300 shrink-0 mt-0.5">
+            <Info className="w-3.5 h-3.5" />
+          </div>
+          <p className="text-[11.5px] leading-relaxed text-sky-100/90">
+            Vous êtes actuellement dans une plage horaire où{' '}
+            <strong className="font-semibold text-white">
+              certaines informations sont masquées
+            </strong>{' '}
+            afin de respecter le{' '}
+            <strong className="font-semibold text-white">droit à la déconnexion</strong>.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={handleDismiss}
+          className="p-1 rounded-lg text-sky-300/75 active:bg-sky-400/15 shrink-0"
+          aria-label="Fermer"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+
+      {expanded && (
+        <ul className="pl-6 pr-1 space-y-1.5 text-[11px] text-sky-100/80 list-disc leading-relaxed">
+          <li>
+            Les <strong className="text-white font-semibold">nouvelles notes</strong> seront
+            visibles à partir de <strong className="text-white font-semibold">7h</strong>, 1 jour
+            après leur publication.
+          </li>
+          <li>
+            <strong className="text-white font-semibold">Aucun nouveau travail à faire</strong> ne
+            sera publié de <strong className="text-white font-semibold">20h à 7h</strong>.
+          </li>
+          <li>
+            Les{' '}
+            <strong className="text-white font-semibold">
+              nouveaux messages, informations et sondages
+            </strong>{' '}
+            ne seront pas publiés :
+            <ul className="pl-3 mt-1 space-y-0.5 list-none text-sky-100/75">
+              <li>
+                - entre <strong className="text-white font-semibold">20h</strong> et{' '}
+                <strong className="text-white font-semibold">7h</strong> du{' '}
+                <strong className="text-white font-semibold">lundi au vendredi</strong>
+              </li>
+              <li>
+                - les <strong className="text-white font-semibold">samedi</strong> et{' '}
+                <strong className="text-white font-semibold">dimanche</strong>
+              </li>
+              <li>
+                - les <strong className="text-white font-semibold">jours fériés</strong>
+              </li>
+              <li>
+                - pendant les{' '}
+                <strong className="text-white font-semibold">vacances scolaires</strong>
+                {info.holidayName ? ` (${info.holidayName})` : ''}
+              </li>
+            </ul>
+          </li>
+        </ul>
+      )}
+
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="px-2.5 py-1 rounded-full bg-sky-500/15 border border-sky-400/35 text-[10.5px] font-semibold text-sky-200 inline-flex items-center gap-1.5"
+        >
+          {expanded ? (
+            <>
+              <EyeOff className="w-3 h-3" />
+              <span>Voir moins</span>
+            </>
+          ) : (
+            <>
+              <Eye className="w-3 h-3" />
+              <span>Voir plus</span>
+            </>
+          )}
+        </button>
+      </div>
     </div>
+  );
+};
+
+/* ================= IN-APP CUSTOM BOTTOM SHEET SELECTOR ================= */
+interface MobileSelectOption {
+  value: string;
+  label: string;
+  subtitle?: string;
+  colorDot?: string;
+}
+
+const MobileSelectSheet: React.FC<{
+  title: string;
+  value: string;
+  options: MobileSelectOption[];
+  placeholder?: string;
+  fullWidth?: boolean;
+  onChange: (value: string) => void;
+}> = ({ title, value, options, placeholder = 'Sélectionner…', fullWidth = false, onChange }) => {
+  const [open, setOpen] = useState(false);
+  const selected = options.find((o) => o.value === value) ?? options[0];
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className={`${
+          fullWidth ? 'w-full justify-between px-3 py-2.5' : 'max-w-[170px] px-3 py-1.5'
+        } rounded-xl bg-[#0F0F16] border border-white/[0.1] text-xs font-medium text-white inline-flex items-center gap-2 active:scale-[0.98] transition-all`}
+      >
+        <span className="inline-flex items-center gap-2 min-w-0">
+          {selected?.colorDot && (
+            <span
+              className="w-2 h-2 rounded-full shrink-0"
+              style={{ backgroundColor: selected.colorDot }}
+            />
+          )}
+          <span className="truncate">{selected?.label || placeholder}</span>
+        </span>
+        <ChevronDown className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+      </button>
+
+      {open &&
+        createPortal(
+          <div
+            onClick={() => setOpen(false)}
+            className="fixed inset-0 z-[70] bg-black/75 backdrop-blur-sm flex items-end justify-center"
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-lg max-h-[75vh] rounded-t-3xl bg-[#101018] border-t border-white/[0.12] flex flex-col overflow-hidden safe-bottom shadow-2xl"
+            >
+              <div className="w-10 h-1 rounded-full bg-white/15 mx-auto mt-2.5 shrink-0" />
+              <div className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between gap-2 shrink-0">
+                <span className="text-sm font-bold text-white">{title}</span>
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  className="p-1.5 rounded-lg text-zinc-400 active:bg-white/[0.06]"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
+                {options.map((opt) => {
+                  const isActive = opt.value === (selected?.value ?? value);
+                  return (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => {
+                        onChange(opt.value);
+                        setOpen(false);
+                      }}
+                      className={`w-full px-3.5 py-3 rounded-2xl border text-left flex items-center justify-between gap-3 transition-all ${
+                        isActive
+                          ? 'bg-accent/15 border-accent/45 text-white'
+                          : 'bg-[#151520] border-white/[0.05] text-zinc-300 active:bg-[#1B1B29]'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        {opt.colorDot && (
+                          <span
+                            className="w-2.5 h-2.5 rounded-full shrink-0"
+                            style={{ backgroundColor: opt.colorDot }}
+                          />
+                        )}
+                        <div className="min-w-0">
+                          <div className="text-xs font-semibold truncate">{opt.label}</div>
+                          {opt.subtitle && (
+                            <div className="text-[10.5px] text-zinc-400 truncate mt-0.5">
+                              {opt.subtitle}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      {isActive && (
+                        <span className="w-5 h-5 rounded-full bg-accent text-black flex items-center justify-center shrink-0">
+                          <Check className="w-3.5 h-3.5 stroke-[3]" />
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+    </>
   );
 };
 
@@ -148,7 +356,7 @@ export const MobileDashboard: React.FC<{
   homework: HomeworkDTO[];
   grades: GradesOverviewDTO | null;
   news: NewsItemDTO[];
-  messagingDisabled?: boolean;
+  unreadMessagesCount?: number;
   widgets?: {
     showKpis: boolean;
     showTimetable: boolean;
@@ -163,7 +371,7 @@ export const MobileDashboard: React.FC<{
   homework,
   grades,
   news,
-  messagingDisabled = false,
+  unreadMessagesCount,
   widgets,
   showBreaks = true,
   onNavigate,
@@ -294,8 +502,8 @@ export const MobileDashboard: React.FC<{
         <h1 className="text-xl font-bold text-white mt-0.5">Salut, {profile.firstName}</h1>
       </div>
 
-      {/* Droit à la déconnexion banner (only when active) */}
-      <MobileRightToDisconnectNote serverDisabled={messagingDisabled} onlyWhenActive />
+      {/* Droit à la déconnexion banner (uniquement 20h-7h, week-ends, fériés & vacances) */}
+      <MobileRightToDisconnectNote holidays={profile.holidays} />
 
       {/* Live Next Class */}
       {nextLesson && (
@@ -366,15 +574,36 @@ export const MobileDashboard: React.FC<{
             {urgentHw.length}
           </div>
         </button>
-        <button
-          onClick={() => onNavigate('messages')}
-          className="p-3 rounded-2xl bg-[#0F0F16] border border-white/[0.06] text-left"
-        >
-          <div className="text-[10.5px] text-zinc-400">Infos</div>
-          <div className="text-lg font-extrabold text-white mt-0.5 tabular-nums">
-            {news.filter((n) => !n.read).length}
-          </div>
-        </button>
+        {(() => {
+          const unreadInfoTotal =
+            unreadMessagesCount ?? news.filter((n) => !n.read).length;
+          return (
+            <button
+              onClick={() => onNavigate('messages')}
+              className={`relative p-3 rounded-2xl border text-left ${
+                unreadInfoTotal > 0
+                  ? 'bg-accent/[0.08] border-accent/35'
+                  : 'bg-[#0F0F16] border-white/[0.06]'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-1">
+                <div className="text-[10.5px] text-zinc-400">Infos</div>
+                {unreadInfoTotal > 0 && (
+                  <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-accent text-black text-[10px] font-extrabold flex items-center justify-center tabular-nums shadow-glow">
+                    {unreadInfoTotal > 99 ? '99+' : unreadInfoTotal}
+                  </span>
+                )}
+              </div>
+              <div
+                className={`text-lg font-extrabold mt-0.5 tabular-nums ${
+                  unreadInfoTotal > 0 ? 'text-accent' : 'text-white'
+                }`}
+              >
+                {unreadInfoTotal}
+              </div>
+            </button>
+          );
+        })()}
       </div>
       )}
 
@@ -951,16 +1180,17 @@ export const MobileTimetable: React.FC<{
         )}
       </div>
 
-      {/* Bottom Sheet Course Details */}
-      {selectedItem && (
-        <div
-          onClick={() => setSelectedItem(null)}
-          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end justify-center"
-        >
+      {/* Bottom Sheet Course Details (portaled to document.body so scrolling never offsets it) */}
+      {selectedItem &&
+        createPortal(
           <div
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-lg max-h-[82vh] rounded-t-3xl bg-[#101018] border-t border-white/[0.12] flex flex-col overflow-hidden safe-bottom"
+            onClick={() => setSelectedItem(null)}
+            className="fixed inset-0 z-[60] bg-black/75 backdrop-blur-sm flex items-end justify-center"
           >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-lg max-h-[82vh] rounded-t-3xl bg-[#101018] border-t border-white/[0.12] flex flex-col overflow-hidden safe-bottom"
+            >
             <div
               className="h-1.5 w-full"
               style={{
@@ -1079,8 +1309,9 @@ export const MobileTimetable: React.FC<{
               )}
             </div>
           </div>
-        </div>
-      )}
+        </div>,
+          document.body
+        )}
     </div>
   );
 };
@@ -1088,8 +1319,9 @@ export const MobileTimetable: React.FC<{
 /* ================= HOMEWORK ================= */
 export const MobileHomework: React.FC<{
   homework: HomeworkDTO[];
+  holidays?: HolidayDTO[];
   onToggleDone: (id: string, done: boolean) => void;
-}> = ({ homework, onToggleDone }) => {
+}> = ({ homework, holidays, onToggleDone }) => {
   const [filter, setFilter] = useState<'todo' | 'done' | 'all'>('todo');
   const grouped = useMemo(() => {
     const filtered = homework.filter((h) =>
@@ -1125,7 +1357,7 @@ export const MobileHomework: React.FC<{
         </div>
       </div>
 
-      <MobileRightToDisconnectNote />
+      <MobileRightToDisconnectNote holidays={holidays} />
 
       {grouped.length === 0 ? (
         <div className="rounded-2xl bg-[#0D0D13] border border-white/[0.06] py-14 text-center text-xs text-zinc-500">
@@ -1200,8 +1432,9 @@ export const MobileGrades: React.FC<{
   grades: GradesOverviewDTO | null;
   periods: PeriodDTO[];
   selectedPeriodId: string;
+  holidays?: HolidayDTO[];
   onSelectPeriod: (id: string) => void;
-}> = ({ grades, periods, selectedPeriodId, onSelectPeriod }) => {
+}> = ({ grades, periods, selectedPeriodId, holidays, onSelectPeriod }) => {
   const [simOpen, setSimOpen] = useState(false);
   const [sims, setSims] = useState<Array<{ id: string; subjectId: string; subject: string; val: number; outOf: number; coef: number }>>([]);
   const [simSub, setSimSub] = useState('');
@@ -1249,20 +1482,22 @@ export const MobileGrades: React.FC<{
         <h1 className="text-lg font-bold text-white">Notes</h1>
         <div className="flex items-center gap-2">
           {periods.length > 0 && (
-            <select
+            <MobileSelectSheet
+              title="Choisir la période"
               value={selectedPeriodId}
-              onChange={(e) => {
+              options={periods.map((p) => ({
+                value: p.id,
+                label: p.name,
+                subtitle:
+                  p.startDate && p.endDate
+                    ? `${formatDateShort(p.startDate)} – ${formatDateShort(p.endDate)}`
+                    : undefined,
+              }))}
+              onChange={(val) => {
                 setSims([]);
-                onSelectPeriod(e.target.value);
+                onSelectPeriod(val);
               }}
-              className="px-2.5 py-1.5 rounded-xl bg-[#0F0F16] border border-white/[0.08] text-xs text-white"
-            >
-              {periods.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+            />
           )}
           <button
             onClick={() => setSimOpen((v) => !v)}
@@ -1278,7 +1513,7 @@ export const MobileGrades: React.FC<{
       </div>
 
       {/* Overall Card */}
-      <MobileRightToDisconnectNote />
+      <MobileRightToDisconnectNote holidays={holidays} />
 
       <div className="p-4 rounded-2xl bg-[#0E0E15] border border-white/[0.07] flex items-center justify-between">
         <div>
@@ -1314,17 +1549,19 @@ export const MobileGrades: React.FC<{
               </button>
             )}
           </div>
-          <select
+          <MobileSelectSheet
+            title="Choisir une matière"
             value={simSub || computed.subjects[0]?.subjectId || ''}
-            onChange={(e) => setSimSub(e.target.value)}
-            className="w-full px-3 py-2 rounded-xl bg-[#09090F] border border-white/[0.08] text-xs text-white"
-          >
-            {computed.subjects.map((s) => (
-              <option key={s.subjectId} value={s.subjectId}>
-                {s.subject}
-              </option>
-            ))}
-          </select>
+            fullWidth
+            options={computed.subjects.map((s) => ({
+              value: s.subjectId,
+              label: s.subject,
+              subtitle:
+                s.avg !== undefined ? `Moyenne actuelle : ${formatGradeNumber(s.avg)}/${s.outOf}` : undefined,
+              colorDot: normalizeHexColor(s.backgroundColor),
+            }))}
+            onChange={(val) => setSimSub(val)}
+          />
           <div className="flex gap-2">
             <input
               value={simVal}
@@ -1431,20 +1668,22 @@ export const MobileAttendance: React.FC<{
   onSelectPeriod: (id: string) => void;
 }> = ({ attendance, periods, selectedPeriodId, onSelectPeriod }) => (
   <div className="p-4 space-y-4">
-    <div className="flex items-center justify-between">
+    <div className="flex items-center justify-between gap-2">
       <h1 className="text-lg font-bold text-white">Vie scolaire</h1>
       {periods.length > 0 && (
-        <select
+        <MobileSelectSheet
+          title="Choisir la période"
           value={selectedPeriodId}
-          onChange={(e) => onSelectPeriod(e.target.value)}
-          className="px-2.5 py-1.5 rounded-xl bg-[#0F0F16] border border-white/[0.08] text-xs text-white"
-        >
-          {periods.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
+          options={periods.map((p) => ({
+            value: p.id,
+            label: p.name,
+            subtitle:
+              p.startDate && p.endDate
+                ? `${formatDateShort(p.startDate)} – ${formatDateShort(p.endDate)}`
+                : undefined,
+          }))}
+          onChange={(val) => onSelectPeriod(val)}
+        />
       )}
     </div>
 
@@ -1491,10 +1730,11 @@ export const MobileAttendance: React.FC<{
 export const MobileMessages: React.FC<{
   news: NewsItemDTO[];
   discussions: DiscussionSummaryDTO[];
-  messagingDisabled?: boolean;
+  holidays?: HolidayDTO[];
   onNewsDetailLoaded?: (item: NewsItemDTO) => void;
+  onDiscussionOpened?: (id: string) => void;
   onRefresh: () => Promise<void>;
-}> = ({ news, discussions, messagingDisabled = false, onNewsDetailLoaded, onRefresh }) => {
+}> = ({ news, discussions, holidays, onNewsDetailLoaded, onDiscussionOpened, onRefresh }) => {
   const [sub, setSub] = useState<'news' | 'discussions'>('news');
   const [openNews, setOpenNews] = useState<NewsItemDTO | null>(null);
   const [loadingNewsDetail, setLoadingNewsDetail] = useState(false);
@@ -1503,36 +1743,65 @@ export const MobileMessages: React.FC<{
   const [reply, setReply] = useState('');
   const [surveyDrafts, setSurveyDrafts] = useState<Record<string, { selectedAnswers?: number[]; textInputAnswer?: string }>>({});
 
+  const unreadNewsCount = useMemo(() => news.filter((n) => !n.read).length, [news]);
+  const unreadDiscussionsCount = useMemo(
+    () => discussions.reduce((s, d) => s + d.numberOfMessagesUnread, 0),
+    [discussions]
+  );
+
   useEffect(() => {
     if (!openDisc) return;
+    if (openDisc.numberOfMessagesUnread > 0) {
+      onDiscussionOpened?.(openDisc.id);
+    }
     mobilePronote.getDiscussionMessages(openDisc.id).then(setThread).catch(() => setThread(null));
-  }, [openDisc?.id]);
+  }, [openDisc?.id, openDisc?.numberOfMessagesUnread, onDiscussionOpened]);
 
   return (
     <div className="p-4 space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-bold text-white">Infos & Messages</h1>
-        <div className="p-1 rounded-xl bg-[#0D0D13] border border-white/[0.06] flex gap-1 text-xs">
+      <div className="flex items-center justify-between gap-2">
+        <h1 className="text-lg font-bold text-white truncate">Infos & Messages</h1>
+        <div className="p-1 rounded-xl bg-[#0D0D13] border border-white/[0.06] flex gap-1 text-xs shrink-0">
           <button
             onClick={() => setSub('news')}
-            className={`px-3 py-1 rounded-lg font-semibold flex items-center gap-1 ${
+            className={`px-2.5 py-1 rounded-lg font-semibold flex items-center gap-1.5 ${
               sub === 'news' ? 'bg-accent text-black' : 'text-zinc-400'
             }`}
           >
-            <Bell className="w-3.5 h-3.5" /> Infos
+            <Bell className="w-3.5 h-3.5" />
+            <span>Infos</span>
+            {unreadNewsCount > 0 && (
+              <span
+                className={`min-w-[17px] h-[17px] px-1 rounded-full text-[10px] font-extrabold flex items-center justify-center tabular-nums ${
+                  sub === 'news' ? 'bg-black/20 text-black' : 'bg-accent text-black'
+                }`}
+              >
+                {unreadNewsCount > 99 ? '99+' : unreadNewsCount}
+              </span>
+            )}
           </button>
           <button
             onClick={() => setSub('discussions')}
-            className={`px-3 py-1 rounded-lg font-semibold flex items-center gap-1 ${
+            className={`px-2.5 py-1 rounded-lg font-semibold flex items-center gap-1.5 ${
               sub === 'discussions' ? 'bg-accent text-black' : 'text-zinc-400'
             }`}
           >
-            <MessageSquare className="w-3.5 h-3.5" /> Messages
+            <MessageSquare className="w-3.5 h-3.5" />
+            <span>Messages</span>
+            {unreadDiscussionsCount > 0 && (
+              <span
+                className={`min-w-[17px] h-[17px] px-1 rounded-full text-[10px] font-extrabold flex items-center justify-center tabular-nums ${
+                  sub === 'discussions' ? 'bg-black/20 text-black' : 'bg-accent text-black'
+                }`}
+              >
+                {unreadDiscussionsCount > 99 ? '99+' : unreadDiscussionsCount}
+              </span>
+            )}
           </button>
         </div>
       </div>
 
-      <MobileRightToDisconnectNote serverDisabled={messagingDisabled} />
+      <MobileRightToDisconnectNote holidays={holidays} />
 
       {sub === 'news' ? (
         news.length === 0 ? (
@@ -1607,7 +1876,14 @@ export const MobileMessages: React.FC<{
                 className="w-full p-3.5 rounded-2xl bg-[#0F0F17] border border-white/[0.06] text-left space-y-1"
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-bold text-white truncate">{d.subject}</span>
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    {d.numberOfMessagesUnread > 0 && (
+                      <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-accent text-black text-[10px] font-extrabold flex items-center justify-center tabular-nums shrink-0">
+                        {d.numberOfMessagesUnread > 99 ? '99+' : d.numberOfMessagesUnread}
+                      </span>
+                    )}
+                    <span className="text-sm font-bold text-white truncate">{d.subject}</span>
+                  </div>
                   <span className="text-[10.5px] text-zinc-500 shrink-0">{formatDateRelative(d.date)}</span>
                 </div>
                 <div className="text-xs text-zinc-400 truncate">{d.creator}</div>
@@ -1617,9 +1893,10 @@ export const MobileMessages: React.FC<{
         </div>
       )}
 
-      {/* Open News / Survey Modal */}
-      {openNews && (
-        <div className="fixed inset-0 z-50 bg-[#060608] flex flex-col safe-top safe-bottom">
+      {/* Open News / Survey Modal (portaled to document.body) */}
+      {openNews &&
+        createPortal(
+          <div className="fixed inset-0 z-[60] bg-[#060608] flex flex-col safe-top safe-bottom">
           <div className="p-4 border-b border-white/[0.06] flex items-center justify-between gap-2">
             <h2 className="text-sm font-bold text-white truncate">{openNews.title}</h2>
             <button onClick={() => setOpenNews(null)} className="p-1.5 text-zinc-400">
@@ -1735,12 +2012,14 @@ export const MobileMessages: React.FC<{
               </div>
             )}
           </div>
-        </div>
-      )}
+        </div>,
+          document.body
+        )}
 
-      {/* Open Discussion Thread */}
-      {openDisc && (
-        <div className="fixed inset-0 z-50 bg-[#060608] flex flex-col safe-top safe-bottom">
+      {/* Open Discussion Thread (portaled to document.body) */}
+      {openDisc &&
+        createPortal(
+          <div className="fixed inset-0 z-[60] bg-[#060608] flex flex-col safe-top safe-bottom">
           <div className="p-4 border-b border-white/[0.06] flex items-center justify-between gap-2">
             <h2 className="text-sm font-bold text-white truncate">{openDisc.subject}</h2>
             <button onClick={() => setOpenDisc(null)} className="p-1.5 text-zinc-400">
@@ -1782,8 +2061,9 @@ export const MobileMessages: React.FC<{
               </button>
             </form>
           )}
-        </div>
-      )}
+        </div>,
+          document.body
+        )}
     </div>
   );
 };

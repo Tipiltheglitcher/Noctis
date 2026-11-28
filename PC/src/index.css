@@ -248,7 +248,6 @@ input {
 }
 
 main {
-  contain: layout style;
   overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
 }

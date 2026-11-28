@@ -139,10 +139,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <span
                     className={
                       compact
-                        ? 'absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 text-[10px] font-bold rounded-full bg-accent text-black flex items-center justify-center tabular-nums'
-                        : `px-2 py-0.5 text-[11px] font-semibold rounded-full tabular-nums ${
-                            active
-                              ? 'bg-accent text-black'
+                        ? 'absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 text-[10px] font-bold rounded-full bg-accent text-black flex items-center justify-center tabular-nums shadow-glow'
+                        : `min-w-[20px] h-[20px] px-1.5 text-[11px] font-bold rounded-full flex items-center justify-center tabular-nums ${
+                            active || item.id === 'messages'
+                              ? 'bg-accent text-black shadow-glow'
                               : 'bg-white/[0.08] text-zinc-200 group-hover:bg-white/[0.14]'
                           }`
                     }

@@ -9,7 +9,7 @@ import {
   Search,
   Loader2,
 } from 'lucide-react';
-import type { HomeworkDTO } from '@shared/types';
+import type { HolidayDTO, HomeworkDTO } from '@shared/types';
 import {
   formatDateRelative,
   formatDurationMinutes,
@@ -22,6 +22,7 @@ import { RightToDisconnectNote } from '../components/RightToDisconnectNote';
 interface HomeworkViewProps {
   homework: HomeworkDTO[];
   loading: boolean;
+  holidays?: HolidayDTO[];
   onToggleDone: (id: string, done: boolean) => void;
 }
 
@@ -43,6 +44,7 @@ const RETURN_KIND_LABELS: Record<number, string> = {
 export const HomeworkView: React.FC<HomeworkViewProps> = ({
   homework,
   loading,
+  holidays,
   onToggleDone,
 }) => {
   const [filter, setFilter] = useState<StatusFilter>('todo');
@@ -134,8 +136,8 @@ export const HomeworkView: React.FC<HomeworkViewProps> = ({
         </div>
       </div>
 
-      {/* Search & Subject Filter */}
-      <RightToDisconnectNote />
+      {/* Droit à la déconnexion (uniquement 20h-7h, week-ends, fériés & vacances) */}
+      <RightToDisconnectNote holidays={holidays} />
 
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[220px]">

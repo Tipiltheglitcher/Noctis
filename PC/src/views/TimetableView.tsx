@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ChevronLeft,
   ChevronRight,
@@ -307,7 +308,7 @@ export const TimetableView: React.FC<TimetableViewProps> = ({
       };
     }
 
-    const margin = 12;
+    const margin = 10;
     const canPlaceRight = popover.rect.right + margin + width <= vw - 12;
     const side: 'right' | 'left' = canPlaceRight ? 'right' : 'left';
     const left =
@@ -315,7 +316,7 @@ export const TimetableView: React.FC<TimetableViewProps> = ({
         ? popover.rect.right + margin
         : Math.max(12, popover.rect.left - width - margin);
 
-    const idealTop = popover.rect.top - 8;
+    const idealTop = popover.rect.top - 4;
     const top = Math.max(54, Math.min(vh - maxHeight - 16, idealTop));
 
     return { left, top, width, maxHeight, side };
@@ -872,19 +873,21 @@ export const TimetableView: React.FC<TimetableViewProps> = ({
         </div>
       </div>
 
-      {/* Floating Side Popover anchored RIGHT NEXT TO the clicked course */}
-      {popover && popoverPosition && (
-        <div
-          ref={popoverRef}
-          style={{
-            position: 'fixed',
-            top: `${popoverPosition.top}px`,
-            left: `${popoverPosition.left}px`,
-            width: `${popoverPosition.width}px`,
-            maxHeight: `${popoverPosition.maxHeight}px`,
-          }}
-          className="z-50 rounded-2xl bg-[#101018]/98 border border-white/[0.13] shadow-[0_20px_60px_-10px_rgba(0,0,0,0.9)] backdrop-blur-xl flex flex-col overflow-hidden animate-slide-up"
-        >
+      {/* Floating Side Popover rendered in document.body right next to the clicked course */}
+      {popover &&
+        popoverPosition &&
+        createPortal(
+          <div
+            ref={popoverRef}
+            style={{
+              position: 'fixed',
+              top: `${popoverPosition.top}px`,
+              left: `${popoverPosition.left}px`,
+              width: `${popoverPosition.width}px`,
+              maxHeight: `${popoverPosition.maxHeight}px`,
+            }}
+            className="z-50 rounded-2xl bg-[#101018]/98 border border-white/[0.13] shadow-[0_20px_60px_-10px_rgba(0,0,0,0.9)] backdrop-blur-xl flex flex-col overflow-hidden animate-slide-up"
+          >
           <div
             className="h-1.5 w-full shrink-0"
             style={{
@@ -1115,8 +1118,9 @@ export const TimetableView: React.FC<TimetableViewProps> = ({
               </div>
             )}
           </div>
-        </div>
-      )}
+        </div>,
+          document.body
+        )}
     </div>
   );
 };

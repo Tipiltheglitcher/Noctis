@@ -1,4 +1,4 @@
-import type { TimetableItemDTO } from '@shared/types';
+import type { HolidayDTO, TimetableItemDTO } from '@shared/types';
 import { isSameDay } from './format';
 
 export function isWeekend(date: Date): boolean {
@@ -235,30 +235,138 @@ export function computeDayBreaks(dayItems: TimetableItemDTO[]): DayBreakSlot[] {
 
 export interface RightToDisconnectInfo {
   active: boolean;
-  title: string;
-  description: string;
+  reason: 'night' | 'weekend' | 'public_holiday' | 'school_holiday' | null;
+  windowKey: string;
+  holidayName?: string;
 }
 
+function getEasterSunday(year: number): Date {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31); // 3 = March, 4 = April
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(year, month - 1, day);
+}
+
+export function isFrenchPublicHoliday(date: Date): boolean {
+  const y = date.getFullYear();
+  const mo = date.getMonth() + 1; // 1..12
+  const da = date.getDate();
+
+  // Fixed French public holidays
+  const fixed: Array<[number, number]> = [
+    [1, 1],   // Jour de l'an
+    [5, 1],   // Fête du Travail
+    [5, 8],   // Victoire 1945
+    [7, 14],  // Fête nationale
+    [8, 15],  // Assomption
+    [11, 1],  // Toussaint
+    [11, 11], // Armistice 1918
+    [12, 25], // Noël
+  ];
+  if (fixed.some(([m, d]) => m === mo && d === da)) return true;
+
+  // Movable Easter-based French public holidays
+  const easter = getEasterSunday(y);
+  const addDays = (base: Date, offset: number) => {
+    const res = new Date(base);
+    res.setDate(base.getDate() + offset);
+    return res;
+  };
+  const movable = [
+    addDays(easter, 1),  // Lundi de Pâques
+    addDays(easter, 39), // Jeudi de l'Ascension
+    addDays(easter, 50), // Lundi de Pentecôte
+  ];
+  return movable.some((h) => isSameDay(h, date));
+}
+
+export function findActiveSchoolHoliday(
+  date: Date,
+  holidays?: HolidayDTO[]
+): HolidayDTO | null {
+  if (!holidays || holidays.length === 0) return null;
+  const dayStartMs = startOfDay(date).getTime();
+  for (const h of holidays) {
+    const s = new Date(h.startDate);
+    const e = new Date(h.endDate);
+    if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) continue;
+    const sDay = startOfDay(s).getTime();
+    const eDay = startOfDay(e).getTime();
+    if (dayStartMs >= sDay && dayStartMs <= eDay) {
+      return h;
+    }
+  }
+  return null;
+}
+
+/**
+ * Strictly matches French right-to-disconnect legal windows (PRONOTE):
+ * - Weekdays (Mon-Fri): 20h00 -> 07h00 only
+ * - Weekends: Saturday & Sunday (all day)
+ * - French public holidays (jours fériés)
+ * - School holidays (vacances scolaires from PRONOTE instance)
+ */
 export function getRightToDisconnectInfo(
   now = new Date(),
-  serverDisabled = false
+  holidays?: HolidayDTO[]
 ): RightToDisconnectInfo {
   const day = now.getDay(); // 0=Sun .. 6=Sat
   const hour = now.getHours();
+  const dateKey = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
 
-  const isWeekendWindow =
-    day === 6 || day === 0 || (day === 5 && hour >= 20) || (day === 1 && hour < 7);
-  const isNightWindow = hour >= 20 || hour < 7;
-  const active = serverDisabled || isWeekendWindow || isNightWindow;
+  const activeHoliday = findActiveSchoolHoliday(now, holidays);
+  if (activeHoliday) {
+    return {
+      active: true,
+      reason: 'school_holiday',
+      windowKey: `school_holiday:${activeHoliday.startDate}`,
+      holidayName: activeHoliday.name,
+    };
+  }
+
+  if (isFrenchPublicHoliday(now)) {
+    return {
+      active: true,
+      reason: 'public_holiday',
+      windowKey: `public_holiday:${dateKey}`,
+    };
+  }
+
+  if (day === 6 || day === 0) {
+    return {
+      active: true,
+      reason: 'weekend',
+      windowKey: `weekend:${getWeekKey(now)}`,
+    };
+  }
+
+  if (hour >= 20 || hour < 7) {
+    // Group 20h..23h59 and next morning 00h..06h59 under the same night key
+    const nightAnchor = new Date(now);
+    if (hour < 7) nightAnchor.setDate(nightAnchor.getDate() - 1);
+    const nightKey = `${nightAnchor.getFullYear()}-${nightAnchor.getMonth() + 1}-${nightAnchor.getDate()}`;
+    return {
+      active: true,
+      reason: 'night',
+      windowKey: `night:${nightKey}`,
+    };
+  }
 
   return {
-    active,
-    title: active
-      ? 'Droit à la déconnexion en cours'
-      : 'Info · Droit à la déconnexion (France)',
-    description: active
-      ? 'Pendant les horaires de déconnexion (soirs, week-ends et jours fériés selon ton établissement), PRONOTE met en pause la publication et la réception des nouvelles notes, devoirs, informations, sondages et messages.'
-      : 'En dehors des horaires ouvrés (soirs, week-ends et jours fériés), les nouvelles notes, devoirs, informations et sondages peuvent être mis en pause par PRONOTE au titre du droit à la déconnexion.',
+    active: false,
+    reason: null,
+    windowKey: '',
   };
 }
 

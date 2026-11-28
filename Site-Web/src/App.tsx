@@ -370,6 +370,7 @@ export default function App() {
               <HomeworkView
                 homework={homework}
                 loading={loadingHomework}
+                holidays={profile.holidays}
                 onToggleDone={handleToggleHomework}
               />
             )}
@@ -379,6 +380,7 @@ export default function App() {
                 periods={profile.gradePeriods}
                 selectedPeriodId={gradePeriodId}
                 loading={loadingGrades}
+                holidays={profile.holidays}
                 onSelectPeriod={(id) => {
                   setGradePeriodId(id);
                   fetchGrades(id);
@@ -403,6 +405,7 @@ export default function App() {
                 discussions={discussions}
                 loading={loadingMessages}
                 messagingDisabled={messagingDisabled}
+                holidays={profile.holidays}
                 onMarkNewsRead={handleMarkNewsRead}
                 onNewsDetailLoaded={handleNewsDetailLoaded}
                 onRefreshAllMessages={fetchMessages}
@@ -423,7 +426,7 @@ export default function App() {
               <SettingsView
                 profile={profile}
                 settings={settings}
-                appVersion="Web 1.2.0"
+                appVersion="Web 1.2.1"
                 checkingUpdate={false}
                 updateFeedback="Tu utilises Noctis Web (toujours à jour). Pour la connexion ENT intégrée et le mode hors ligne, télécharge Noctis PC ou Android."
                 onCheckUpdates={() => {
@@ -478,7 +481,14 @@ export default function App() {
                   : 'text-zinc-500'
               }`}
             >
-              <MoreHorizontal className="w-5 h-5" />
+              <div className="relative">
+                <MoreHorizontal className="w-5 h-5" />
+                {unreadCount > 0 && (
+                  <span className="absolute -top-1.5 -right-2.5 min-w-[16px] h-[16px] px-1 rounded-full bg-accent text-black text-[9.5px] font-extrabold leading-none flex items-center justify-center tabular-nums shadow-glow ring-2 ring-[#09090D]">
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </span>
+                )}
+              </div>
               <span>Plus</span>
             </button>
           </nav>
@@ -503,10 +513,15 @@ export default function App() {
                 <div className="grid grid-cols-2 gap-2.5">
                   {(
                     [
-                      { id: 'messages', label: 'Infos & Messages', icon: MessageSquareText },
-                      { id: 'menus', label: 'Cantine (Midi/Soir)', icon: UtensilsCrossed },
-                      { id: 'attendance', label: 'Vie scolaire', icon: Clock3 },
-                      { id: 'settings', label: 'Paramètres', icon: Settings },
+                      {
+                        id: 'messages',
+                        label: 'Infos & Messages',
+                        icon: MessageSquareText,
+                        badge: unreadCount,
+                      },
+                      { id: 'menus', label: 'Cantine (Midi/Soir)', icon: UtensilsCrossed, badge: 0 },
+                      { id: 'attendance', label: 'Vie scolaire', icon: Clock3, badge: 0 },
+                      { id: 'settings', label: 'Paramètres', icon: Settings, badge: 0 },
                     ] as const
                   ).map((item) => {
                     const Icon = item.icon;
@@ -517,10 +532,17 @@ export default function App() {
                           setActiveTab(item.id);
                           setMobileMoreOpen(false);
                         }}
-                        className="p-3.5 rounded-2xl bg-[#161622] border border-white/[0.06] flex items-center gap-2.5 text-left"
+                        className="relative p-3.5 rounded-2xl bg-[#161622] border border-white/[0.06] flex items-center gap-2.5 text-left"
                       >
                         <Icon className="w-5 h-5 text-accent shrink-0" />
-                        <span className="text-xs font-semibold text-white">{item.label}</span>
+                        <span className="text-xs font-semibold text-white truncate flex-1">
+                          {item.label}
+                        </span>
+                        {item.badge > 0 && (
+                          <span className="min-w-[20px] h-[20px] px-1.5 rounded-full bg-accent text-black text-[10.5px] font-extrabold flex items-center justify-center tabular-nums shadow-glow shrink-0">
+                            {item.badge > 99 ? '99+' : item.badge}
+                          </span>
+                        )}
                       </button>
                     );
                   })}

@@ -15,6 +15,7 @@ import {
 import type {
   DiscussionSummaryDTO,
   DiscussionThreadDTO,
+  HolidayDTO,
   NewsItemDTO,
 } from '@shared/types';
 import { formatDateFull, formatDateRelative, formatTime, sanitizeHtml } from '@/utils/format';
@@ -25,6 +26,7 @@ interface MessagesViewProps {
   discussions: DiscussionSummaryDTO[];
   loading: boolean;
   messagingDisabled?: boolean;
+  holidays?: HolidayDTO[];
   onMarkNewsRead: (id: string) => void;
   onNewsDetailLoaded: (item: NewsItemDTO) => void;
   onRefreshAllMessages: () => Promise<void>;
@@ -34,7 +36,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
   news,
   discussions,
   loading,
-  messagingDisabled = false,
+  holidays,
   onMarkNewsRead,
   onNewsDetailLoaded,
   onRefreshAllMessages,
@@ -254,8 +256,12 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
               <Bell className="w-3.5 h-3.5" />
               <span>Infos & Sondages</span>
               {unreadNews > 0 && (
-                <span className="px-1.5 rounded-full bg-black/20 text-[10.5px] font-bold">
-                  {unreadNews}
+                <span
+                  className={`min-w-[18px] h-[18px] px-1.5 rounded-full text-[10.5px] font-bold flex items-center justify-center tabular-nums ${
+                    subTab === 'news' ? 'bg-black/20 text-black' : 'bg-accent text-black'
+                  }`}
+                >
+                  {unreadNews > 99 ? '99+' : unreadNews}
                 </span>
               )}
             </button>
@@ -271,8 +277,12 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
               <MessageSquare className="w-3.5 h-3.5" />
               <span>Discussions</span>
               {unreadDiscussions > 0 && (
-                <span className="px-1.5 rounded-full bg-black/20 text-[10.5px] font-bold">
-                  {unreadDiscussions}
+                <span
+                  className={`min-w-[18px] h-[18px] px-1.5 rounded-full text-[10.5px] font-bold flex items-center justify-center tabular-nums ${
+                    subTab === 'discussions' ? 'bg-black/20 text-black' : 'bg-accent text-black'
+                  }`}
+                >
+                  {unreadDiscussions > 99 ? '99+' : unreadDiscussions}
                 </span>
               )}
             </button>
@@ -281,7 +291,7 @@ export const MessagesView: React.FC<MessagesViewProps> = ({
       </div>
 
       {/* Droit à la déconnexion info */}
-      <RightToDisconnectNote serverDisabled={messagingDisabled} className="shrink-0" />
+      <RightToDisconnectNote holidays={holidays} className="shrink-0" />
 
       {/* Split Pane */}
       <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-4">

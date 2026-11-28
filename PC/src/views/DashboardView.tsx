@@ -66,7 +66,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   grades,
   news,
   loading,
-  messagingDisabled = false,
   layout = 'bento',
   widgets = {
     showKpis: true,
@@ -267,8 +266,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         )}
       </div>
 
-      {/* Droit à la déconnexion banner (shown automatically during disconnect hours) */}
-      <RightToDisconnectNote serverDisabled={messagingDisabled} onlyWhenActive />
+      {/* Droit à la déconnexion banner (only during legal hours / weekends / public & school holidays) */}
+      <RightToDisconnectNote holidays={profile.holidays} />
 
       {/* KPI Quick Strip */}
       {widgets.showKpis && (
@@ -338,13 +337,34 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
         <button
           onClick={() => onNavigate('messages')}
-          className="p-4 rounded-2xl bg-[#0F0F15] hover:bg-[#14141C] border border-white/[0.06] text-left transition-all group"
+          className={`p-4 rounded-2xl border text-left transition-all group ${
+            unreadNewsCount > 0
+              ? 'bg-accent/[0.07] hover:bg-accent/[0.11] border-accent/35'
+              : 'bg-[#0F0F15] hover:bg-[#14141C] border-white/[0.06]'
+          }`}
         >
           <div className="flex items-center justify-between text-zinc-400 mb-3">
             <span className="text-[12px] font-medium">Infos & Annonces</span>
-            <Bell className="w-4 h-4 text-zinc-500 group-hover:text-accent transition-colors" />
+            <div className="flex items-center gap-1.5">
+              {unreadNewsCount > 0 && (
+                <span className="min-w-[20px] h-[20px] px-1.5 rounded-full bg-accent text-black text-[10.5px] font-bold flex items-center justify-center tabular-nums shadow-glow">
+                  {unreadNewsCount > 99 ? '99+' : unreadNewsCount}
+                </span>
+              )}
+              <Bell
+                className={`w-4 h-4 transition-colors ${
+                  unreadNewsCount > 0 ? 'text-accent' : 'text-zinc-500 group-hover:text-accent'
+                }`}
+              />
+            </div>
           </div>
-          <div className="text-2xl font-bold text-white tabular-nums">{unreadNewsCount}</div>
+          <div
+            className={`text-2xl font-bold tabular-nums ${
+              unreadNewsCount > 0 ? 'text-accent' : 'text-white'
+            }`}
+          >
+            {unreadNewsCount}
+          </div>
           <div className="text-[11.5px] text-zinc-500 mt-1">
             {unreadNewsCount > 0 ? 'Non lue(s)' : `${news.length} au total`}
           </div>

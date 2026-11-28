@@ -64,6 +64,12 @@ export interface PeriodDTO {
   isDefault: boolean;
 }
 
+export interface HolidayDTO {
+  name: string;
+  startDate: string;
+  endDate: string;
+}
+
 export interface StudentProfile {
   name: string;
   firstName: string;
@@ -83,6 +89,7 @@ export interface StudentProfile {
   };
   gradePeriods: PeriodDTO[];
   attendancePeriods: PeriodDTO[];
+  holidays?: HolidayDTO[];
 }
 
 export interface AttachmentDTO {

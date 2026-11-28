@@ -754,6 +754,7 @@ export default function App() {
               <HomeworkView
                 homework={homework}
                 loading={loadingHomework}
+                holidays={profile.holidays}
                 onToggleDone={handleToggleHomework}
               />
             )}
@@ -764,6 +765,7 @@ export default function App() {
                 periods={profile.gradePeriods}
                 selectedPeriodId={selectedGradePeriodId}
                 loading={loadingGrades}
+                holidays={profile.holidays}
                 onSelectPeriod={handleSelectGradePeriod}
               />
             )}
@@ -784,6 +786,7 @@ export default function App() {
                 discussions={discussions}
                 loading={loadingMessages}
                 messagingDisabled={messagingDisabled}
+                holidays={profile.holidays}
                 onMarkNewsRead={handleMarkNewsRead}
                 onNewsDetailLoaded={handleNewsDetailLoaded}
                 onRefreshAllMessages={async () => {

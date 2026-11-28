@@ -1,7 +1,7 @@
 apply plugin: 'com.android.application'
 
-def noctisVersionCode = (System.getenv("NOCTIS_VERSION_CODE") ?: "10200").toInteger()
-def noctisVersionName = System.getenv("NOCTIS_VERSION_NAME") ?: "1.2.0"
+def noctisVersionCode = (System.getenv("NOCTIS_VERSION_CODE") ?: "10201").toInteger()
+def noctisVersionName = System.getenv("NOCTIS_VERSION_NAME") ?: "1.2.1"
 
 android {
     namespace "com.noctis.mobile"

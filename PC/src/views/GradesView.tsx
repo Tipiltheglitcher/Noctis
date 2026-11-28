@@ -11,7 +11,7 @@ import {
   Loader2,
   Sparkles,
 } from 'lucide-react';
-import type { GradeDTO, GradesOverviewDTO, PeriodDTO } from '@shared/types';
+import type { GradeDTO, GradesOverviewDTO, HolidayDTO, PeriodDTO } from '@shared/types';
 import {
   formatDateShort,
   formatGradeNumber,
@@ -25,6 +25,7 @@ interface GradesViewProps {
   periods: PeriodDTO[];
   selectedPeriodId: string;
   loading: boolean;
+  holidays?: HolidayDTO[];
   onSelectPeriod: (periodId: string) => void;
 }
 
@@ -42,6 +43,7 @@ export const GradesView: React.FC<GradesViewProps> = ({
   periods,
   selectedPeriodId,
   loading,
+  holidays,
   onSelectPeriod,
 }) => {
   const [viewTab, setViewTab] = useState<'subjects' | 'chronological'>('subjects');
@@ -231,7 +233,7 @@ export const GradesView: React.FC<GradesViewProps> = ({
       </div>
 
       {/* Hero Stats + Evolution Chart */}
-      <RightToDisconnectNote />
+      <RightToDisconnectNote holidays={holidays} />
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         <div className="lg:col-span-5 rounded-2xl bg-[#0D0D13] border border-white/[0.07] p-5 flex flex-col justify-between">

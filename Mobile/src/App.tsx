@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   LayoutDashboard,
   CalendarDays,
@@ -65,7 +66,6 @@ export default function App() {
   const [isOffline, setIsOffline] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [reconnecting, setReconnecting] = useState(false);
-  const [messagingDisabled, setMessagingDisabled] = useState(false);
 
   const [timetableDate, setTimetableDate] = useState(() => getInitialSchoolDate());
   const [autoAdvanceNote, setAutoAdvanceNote] = useState<string | null>(() =>
@@ -248,12 +248,10 @@ export default function App() {
       const wave2 = await Promise.allSettled([
         mobilePronote.getNews().then((n) => {
           setNews(n);
-          setMessagingDisabled(mobilePronote.getRightToDisconnectFromServer());
           return true;
         }),
         mobilePronote.getDiscussions().then((d) => {
           setDiscussions(d);
-          setMessagingDisabled(mobilePronote.getRightToDisconnectFromServer());
           return true;
         }),
         mobilePronote.getAttendance(attPeriodId || undefined).then((a) => {
@@ -393,6 +391,19 @@ export default function App() {
     setNews((prev) => prev.map((n) => (n.id === updated.id ? updated : n)));
   }, []);
 
+  const handleDiscussionOpened = useCallback((discussionId: string) => {
+    setDiscussions((prev) =>
+      prev.map((d) => (d.id === discussionId ? { ...d, numberOfMessagesUnread: 0 } : d))
+    );
+  }, []);
+
+  const unreadMessagesCount = useMemo(
+    () =>
+      news.filter((n) => !n.read).length +
+      discussions.reduce((s, d) => s + d.numberOfMessagesUnread, 0),
+    [news, discussions]
+  );
+
   const handleManualUpdate = async () => {
     setCheckingUpdate(true);
     setUpdateMsg(null);
@@ -488,7 +499,7 @@ export default function App() {
                 homework={homework}
                 grades={grades}
                 news={news}
-                messagingDisabled={messagingDisabled}
+                unreadMessagesCount={unreadMessagesCount}
                 widgets={settings.dashboardWidgets}
                 showBreaks={settings.showBreaks !== false}
                 onNavigate={setTab}
@@ -509,13 +520,18 @@ export default function App() {
               />
             )}
             {tab === 'homework' && (
-              <MobileHomework homework={homework} onToggleDone={handleToggleHw} />
+              <MobileHomework
+                homework={homework}
+                holidays={profile.holidays}
+                onToggleDone={handleToggleHw}
+              />
             )}
             {tab === 'grades' && (
               <MobileGrades
                 grades={grades}
                 periods={profile.gradePeriods}
                 selectedPeriodId={gradePeriodId}
+                holidays={profile.holidays}
                 onSelectPeriod={async (id) => {
                   setGradePeriodId(id);
                   const cached =
@@ -569,8 +585,9 @@ export default function App() {
               <MobileMessages
                 news={news}
                 discussions={discussions}
-                messagingDisabled={messagingDisabled}
+                holidays={profile.holidays}
                 onNewsDetailLoaded={handleNewsDetailLoaded}
+                onDiscussionOpened={handleDiscussionOpened}
                 onRefresh={async () => {
                   try {
                     const [n, d] = await Promise.all([
@@ -579,7 +596,6 @@ export default function App() {
                     ]);
                     setNews(n);
                     setDiscussions(d);
-                    setMessagingDisabled(mobilePronote.getRightToDisconnectFromServer());
                   } catch {
                     setIsOffline(true);
                   }
@@ -631,7 +647,6 @@ export default function App() {
                   hasAutoAdvancedRef.current = false;
                   setIsOffline(false);
                   setLastSyncedAt(null);
-                  setMessagingDisabled(false);
                   setAutoAdvanceNote(null);
                   setProfile(null);
                 }}
@@ -675,55 +690,81 @@ export default function App() {
                   : 'text-zinc-500'
               }`}
             >
-              <MoreHorizontal className="w-5 h-5" />
+              <div className="relative">
+                <MoreHorizontal className="w-5 h-5" />
+                {unreadMessagesCount > 0 && (
+                  <span className="absolute -top-1.5 -right-2.5 min-w-[16px] h-[16px] px-1 rounded-full bg-accent text-black text-[9.5px] font-extrabold leading-none flex items-center justify-center tabular-nums shadow-glow ring-2 ring-[#09090D]">
+                    {unreadMessagesCount > 99 ? '99+' : unreadMessagesCount}
+                  </span>
+                )}
+              </div>
               <span>Plus</span>
             </button>
           </nav>
 
-          {/* "Plus" Menu Sheet */}
-          {moreOpen && (
-            <div
-              onClick={() => setMoreOpen(false)}
-              className="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm flex items-end"
-            >
+          {/* "Plus" Menu Sheet (rendered in document.body so scroll never shifts it) */}
+          {moreOpen &&
+            createPortal(
               <div
-                onClick={(e) => e.stopPropagation()}
-                className="w-full rounded-t-3xl bg-[#101018] border-t border-white/10 p-5 space-y-3 safe-bottom"
+                onClick={() => setMoreOpen(false)}
+                className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-end"
               >
-                <div className="flex items-center justify-between pb-1">
-                  <span className="text-sm font-bold text-white">Plus d'espaces</span>
-                  <button onClick={() => setMoreOpen(false)} className="text-zinc-400">
-                    <X className="w-5 h-5" />
-                  </button>
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  className="w-full rounded-t-3xl bg-[#101018] border-t border-white/10 p-5 space-y-3 safe-bottom"
+                >
+                  <div className="flex items-center justify-between pb-1">
+                    <span className="text-sm font-bold text-white">Plus d'espaces</span>
+                    <button onClick={() => setMoreOpen(false)} className="text-zinc-400">
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    {(
+                      [
+                        {
+                          id: 'messages',
+                          label: 'Infos & Messages',
+                          icon: MessageSquareText,
+                          badge: unreadMessagesCount,
+                        },
+                        {
+                          id: 'menus',
+                          label: 'Cantine (Midi/Soir)',
+                          icon: UtensilsCrossed,
+                          badge: 0,
+                        },
+                        { id: 'attendance', label: 'Vie scolaire', icon: Clock3, badge: 0 },
+                        { id: 'settings', label: 'Paramètres', icon: Settings, badge: 0 },
+                      ] as const
+                    ).map((item) => {
+                      const Icon = item.icon;
+                      return (
+                        <button
+                          key={item.id}
+                          onClick={() => {
+                            setTab(item.id);
+                            setMoreOpen(false);
+                          }}
+                          className="relative p-3.5 rounded-2xl bg-[#161622] border border-white/[0.06] flex items-center gap-2.5 text-left"
+                        >
+                          <Icon className="w-5 h-5 text-accent shrink-0" />
+                          <span className="text-xs font-semibold text-white truncate flex-1">
+                            {item.label}
+                          </span>
+                          {item.badge > 0 && (
+                            <span className="min-w-[20px] h-[20px] px-1.5 rounded-full bg-accent text-black text-[10.5px] font-extrabold flex items-center justify-center tabular-nums shadow-glow shrink-0">
+                              {item.badge > 99 ? '99+' : item.badge}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-                <div className="grid grid-cols-2 gap-2.5">
-                  {(
-                    [
-                      { id: 'messages', label: 'Infos & Messages', icon: MessageSquareText },
-                      { id: 'menus', label: 'Cantine (Midi/Soir)', icon: UtensilsCrossed },
-                      { id: 'attendance', label: 'Vie scolaire', icon: Clock3 },
-                      { id: 'settings', label: 'Paramètres', icon: Settings },
-                    ] as const
-                  ).map((item) => {
-                    const Icon = item.icon;
-                    return (
-                      <button
-                        key={item.id}
-                        onClick={() => {
-                          setTab(item.id);
-                          setMoreOpen(false);
-                        }}
-                        className="p-3.5 rounded-2xl bg-[#161622] border border-white/[0.06] flex items-center gap-2.5 text-left"
-                      >
-                        <Icon className="w-5 h-5 text-accent shrink-0" />
-                        <span className="text-xs font-semibold text-white">{item.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          )}
+              </div>,
+              document.body
+            )}
         </>
       )}
 
